@@ -91,23 +91,30 @@ class StrainPlot(tk.Frame):
             dpi=100,
             constrained_layout=True,
             subplotpars=SubplotParams(left=0.5, bottom=0.1, right=0.95, top=0.95),
-            sharex=True
+            sharex=True # x-axes are shared
         )
 
         self.strainplt.set_xlabel("Time (s)")
         self.strainplt.set_ylabel("Strain")
-        self.strainplt.grid(color="darkgrey", alpha=0.65, linestyle='')
+        self.strainplt.grid(color="darkgrey", alpha=0.65, linestyle='dashed')
         self.strainplt.set_facecolor("w")
+        self.strainplt.margins(0, tight=True)
 
         self.strainrateplt.set_xlabel("Time (s)")
         self.strainrateplt.set_ylabel("Strain Rate")
-        self.strainrateplt.grid(color="darkgrey", alpha=0.65, linestyle='')
+        self.strainrateplt.grid(color="darkgrey", alpha=0.65, linestyle='dashed')
         self.strainrateplt.set_facecolor("w")
+        self.strainrateplt.margins(0, tight=True)
 
         self.temperatureplt.set_xlabel("Time (s)")
         self.temperatureplt.set_ylabel("Temperature")
-        self.temperatureplt.grid(color="darkgrey", alpha=0.65, linestyle='')
+        self.temperatureplt.grid(color="darkgrey", alpha=0.65, linestyle='dashed')
         self.temperatureplt.set_facecolor("w")
+        self.temperatureplt.margins(0, tight=True)
+
+        self.line1, = self.strainplt.plot([], [])
+        self.line2, = self.strainrateplt.plot([], [])
+        self.line3, = self.temperatureplt.plot([], [])
 
         canvas = FigureCanvasTkAgg(self.fig, master=self)
         canvas.get_tk_widget().grid(sticky="nsew")
@@ -115,7 +122,7 @@ class StrainPlot(tk.Frame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
         
-        self.ani = FuncAnimation(self.fig, self.animate, interval=500, cache_frame_data=False)
+        self.ani = FuncAnimation(self.fig, self.animate, interval=500, cache_frame_data=False) # Animation frequency
         self.handler.ani = self.ani
 
         self.fig.canvas.mpl_connect('scroll_event', self.on_zoom)
@@ -221,33 +228,15 @@ class StrainPlot(tk.Frame):
                 strainRate.append(reading.strainRate)
                 temperature.append(reading.temperature)
 
-            self.strainplt.clear()
-            self.strainrateplt.clear()
+            self.line1.set_data(elapsedMin, strain)
+            self.strainplt.set_xlim(0, elapsedMin[-1]) # x-axes are shared
+            self.strainplt.set_ylim(0, max(strain))
 
-            # Strain Plot
-            self.strainplt.set_xlabel("Time (s)")
-            self.strainplt.set_ylabel("Strain")
-            self.strainplt.grid(color="darkgrey", linestyle='dashed')
-            self.strainplt.set_facecolor("w")
-            self.strainplt.margins(0, tight=True) 
-            self.strainplt.plot(elapsedMin, strain)
+            self.line2.set_data(elapsedMin, strainRate)
+            self.strainrateplt.set_ylim(0, max(strainRate))
 
-            # Strain Rate Plot
-            self.strainrateplt.set_xlabel("Time (s)")
-            self.strainrateplt.set_ylabel("Strain Rate")
-            self.strainrateplt.grid(color="darkgrey", linestyle='dashed')
-            self.strainrateplt.set_facecolor("w")
-            self.strainrateplt.margins(0, tight=True) 
-            self.strainrateplt.plot(elapsedMin, strainRate)
-
-            # Temperature Plot
-            self.temperatureplt.clear()
-            self.temperatureplt.set_xlabel("Time (s)")
-            self.temperatureplt.set_ylabel("Temperature")
-            self.temperatureplt.grid(color="darkgrey", linestyle='dashed')
-            self.temperatureplt.set_facecolor("w")
-            self.temperatureplt.margins(0, tight=True) 
-            self.temperatureplt.plot(elapsedMin, temperature)
+            self.line3.set_data(elapsedMin, temperature)
+            self.temperatureplt.set_ylim(0, max(temperature))
 
 
 class TestControls(tk.Frame):
@@ -351,7 +340,6 @@ class TestHandler:
                 strainRate=self.strain_rate,
                 temperature=self.strain
             )
-            self.readings.clear()
             self.readings.append(first_reading)
 
             self.test_controls.display("Test started.")
@@ -397,7 +385,7 @@ class TestHandler:
     def take_readings(self):
         while self.is_running and not self.request_stop:
             current_time = time.time()
-            if current_time - self.last_read_time >= 0.25:
+            if current_time - self.last_read_time >= 0.25: # DAQ frequency
                 self.pool.submit(self.get_strain) 
                 self.pool.submit(self.get_time) 
                 self.pool.submit(self.get_strain_rate) 
@@ -408,7 +396,7 @@ class TestHandler:
                 self.readings.append(reading)
                 self.last_read_time = current_time
 
-            if current_time - self.last_save_time >= 5:  # Can change to user entered frequency
+            if current_time - self.last_save_time >= 5:  # Saving data frequency
                 # Print saved data to log
                 self.test_controls.display(f"Elapsed Time: {self.readings[-1].elapsedMin:.2f}\nStrain: {self.readings[-1].strain:.2f}\nStrain Rate: {self.readings[-1].strainRate:.2f}\nTemperature: {self.readings[-1].temperature:.2f}")
                 # Save data to csv file
@@ -432,18 +420,16 @@ class TestHandler:
                     'Strain Rate': reading.strainRate,
                     'Temperature': reading.temperature
                 })
-        # Clear the readings after saving
-        self.readings.clear()
 
-    def get_strain(self):
-        self.strain = np.sqrt(self.elapsed_min) 
+    def get_strain(self): # calculate using gauge length and displacement
+        self.strain = np.sqrt(self.elapsed_min)
 
     def get_time(self):
-        self.elapsed_min = (time.time() - self.start_time) 
+        self.elapsed_min = (time.time() - self.start_time)
     
     def get_strain_rate(self): 
         if len(self.readings) > 0:
-            strain_diff = self.strain - self.readings[-1].strain 
+            strain_diff = self.strain - self.readings[-1].strain
             time_diff = self.elapsed_min - self.readings[-1].elapsedMin
 
             if time_diff > 0: # Avoid division by zero
@@ -456,13 +442,6 @@ class TestHandler:
 
     def get_temperature(self):
         self.temperature= (self.elapsed_min) ** 2
-
-    def rebuild_views(self): 
-        for widget in self.views: 
-            if widget.winfo_exists():
-                self.root.after_idle(widget.build, {"reload": True})
-            else:
-                self.views.remove(widget)
 
 
 class MainFrame(tk.Frame):
