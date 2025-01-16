@@ -30,8 +30,9 @@ class Test:
     def __init__(self):  
         self.name = tk.StringVar()
         self.material = tk.StringVar()
-        self.freq: tk.StringVar() = "100"
+        self.freq: tk.StringVar() = "100" # Can add default for commonly used values
         self.notes = tk.StringVar()
+        self.gauge_length = tk.StringVar() # Can add default for commonly used values
         self.readings: List[Reading] = []
 
 
@@ -64,10 +65,16 @@ class TestInfoEntry(tk.Frame):
         self.freq_ent.grid(row=2, column=1, sticky="ew")    
 
         # row 3 ---------------------------------------------  
+        gauge_length_lbl = tk.Label(self, text="Gauge Length:", anchor="e")
+        gauge_length_lbl.grid(row=3, column=0, sticky="ew")  
+        self.gauge_length_ent = tk.Entry(self, textvariable=self.handler.test.gauge_length)
+        self.gauge_length_ent.grid(row=3, column=1, sticky="ew")
+
+        # row 4 ---------------------------------------------  
         notes_lbl = tk.Label(self, text="Notes:", anchor="e")
-        notes_lbl.grid(row=3, column=0, sticky="ew")  
+        notes_lbl.grid(row=4, column=0, sticky="ew")  
         self.notes_ent = tk.Entry(self, textvariable=self.handler.test.notes)
-        self.notes_ent.grid(row=3, column=1, sticky="ew")
+        self.notes_ent.grid(row=4, column=1, sticky="ew")
 
 
 class StrainPlot(tk.Frame):
@@ -309,43 +316,48 @@ class TestHandler:
         self.last_read_time = time.time()
 
     def start_test(self):
-        self.start_time = time.time() 
-        self.is_running = True
-        self.paused = False
-
         # Read the text entries (except notes)
         self.test.name = self.test_info_entry.name_ent.get()
         self.test.material = self.test_info_entry.matr_ent.get()
         self.test.freq = self.test_info_entry.freq_ent.get()
+        self.test.gauge_length = self.test_info_entry.gauge_length_ent.get()
+        # Require user to enter input before starting test
+        if (self.test.name and self.test.material and self.test.freq and self.test.gauge_length):
+            self.start_time = time.time() 
+            self.is_running = True
+            self.paused = False
 
-        # Disable the text boxes
-        self.test_info_entry.name_ent.config(state="disabled")
-        self.test_info_entry.matr_ent.config(state="disabled")
-        self.test_info_entry.freq_ent.config(state="disabled")
+            # Disable the text boxes
+            self.test_info_entry.name_ent.config(state="disabled")
+            self.test_info_entry.matr_ent.config(state="disabled")
+            self.test_info_entry.freq_ent.config(state="disabled")
+            self.test_info_entry.gauge_length_ent.config(state="disabled")
 
-        # Disable the start button and enable the stop and pause buttons
-        if self.test_controls:
-            self.test_controls.start_btn.configure(state="disabled")
-            self.test_controls.stop_btn.configure(state="normal")
-            self.test_controls.pause_btn.configure(state="normal")
-            self.ani.event_source.start()
+            # Disable the start button and enable the stop and pause buttons
+            if self.test_controls:
+                self.test_controls.start_btn.configure(state="disabled")
+                self.test_controls.stop_btn.configure(state="normal")
+                self.test_controls.pause_btn.configure(state="normal")
+                self.ani.event_source.start()
 
-        # Initialize the first reading
-        self.elapsed_min = 0.0
-        self.strain = 0.0
-        self.strain_rate = 0.0
-        self.temperature = 0.0
-        first_reading = Reading(
-            elapsedMin=self.elapsed_min,
-            strain=self.strain,
-            strainRate=self.strain_rate,
-            temperature=self.strain
-        )
-        self.readings.clear()
-        self.readings.append(first_reading)
+            # Initialize the first reading
+            self.elapsed_min = 0.0
+            self.strain = 0.0
+            self.strain_rate = 0.0
+            self.temperature = 0.0
+            first_reading = Reading(
+                elapsedMin=self.elapsed_min,
+                strain=self.strain,
+                strainRate=self.strain_rate,
+                temperature=self.strain
+            )
+            self.readings.clear()
+            self.readings.append(first_reading)
 
-        self.test_controls.display("Test started.")
-        self.pool.submit(self.cont_test)
+            self.test_controls.display("Test started.")
+            self.pool.submit(self.cont_test)
+        else:
+            self.test_controls.display("Please enter all values.")
 
     def cont_test(self):
         self.is_running = True
@@ -464,8 +476,8 @@ class MainFrame(tk.Frame):
 
     def build(self):
         """Builds the UI"""
-        self.grid_columnconfigure(1, weight=3)
-        self.grid_rowconfigure(1, weight=2)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
         # row 0 ---------------------------------------------
         test_info = TestInfoEntry(self, self.handler)
