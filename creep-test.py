@@ -85,7 +85,6 @@ class StrainPlot(tk.Frame):
         self.build()
 
     def build(self):
-        
         self.fig, (self.strainplt, self.strainrateplt, self.temperatureplt) = plt.subplots(3,
             figsize=(6,6),
             dpi=100,
@@ -121,8 +120,8 @@ class StrainPlot(tk.Frame):
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        
-        self.ani = FuncAnimation(self.fig, self.animate, interval=500, cache_frame_data=False) # Animation frequency
+
+        self.ani = FuncAnimation(self.fig, self.animate, interval=500, cache_frame_data=False) # Animation period
         self.handler.ani = self.ani
 
         self.fig.canvas.mpl_connect('scroll_event', self.on_zoom)
@@ -280,8 +279,7 @@ class TestControls(tk.Frame):
 
 
 class TestHandler:
-    def __init__(self, name: str = "Test 1", test_controls: TestControls = None, strainplot: StrainPlot = None, test_info_entry: TestInfoEntry = None):
-        self.name = name
+    def __init__(self, test_controls: TestControls = None, strainplot: StrainPlot = None, test_info_entry: TestInfoEntry = None):
         self.root: tk.Tk = strainApp.ROOT
         self.test = Test()
 
@@ -289,6 +287,7 @@ class TestHandler:
         self.test_controls = test_controls
         self.strainplot = strainplot
         self.test_info_entry = test_info_entry
+
         self.readings: List[Reading] = []
         self.elapsed_min: float = float()
         self.strain: float = float()
@@ -310,8 +309,22 @@ class TestHandler:
         self.test.material = self.test_info_entry.matr_ent.get()
         self.test.freq = self.test_info_entry.freq_ent.get()
         self.test.gauge_length = self.test_info_entry.gauge_length_ent.get()
-        # Require user to enter input before starting test
-        if (self.test.name and self.test.material and self.test.freq and self.test.gauge_length):
+
+        # Try to convert frequency and gauge length into floats
+        try:
+            freq = float(self.test.freq)
+        except ValueError:
+            freq = 0
+        try:
+            gauge_length = float(self.test.gauge_length)
+        except ValueError:
+            gauge_length = 0
+        
+        # Require user to enter valid input before starting test
+        if (
+            (self.test.name and self.test.material and freq and gauge_length)
+            and (freq > 0) and (gauge_length > 0)
+        ):
             self.start_time = time.time() 
             self.is_running = True
             self.paused = False
@@ -327,7 +340,6 @@ class TestHandler:
                 self.test_controls.start_btn.configure(state="disabled")
                 self.test_controls.stop_btn.configure(state="normal")
                 self.test_controls.pause_btn.configure(state="normal")
-                self.ani.event_source.start()
 
             # Initialize the first reading
             self.elapsed_min = 0.0
@@ -345,7 +357,7 @@ class TestHandler:
             self.test_controls.display("Test started.")
             self.pool.submit(self.cont_test)
         else:
-            self.test_controls.display("Please enter all values.")
+            self.test_controls.display("Please enter valid input.")
 
     def cont_test(self):
         self.is_running = True
@@ -360,13 +372,7 @@ class TestHandler:
         self.ani.event_source.stop()
 
         self.test_controls.display("Test stopped.")
-
         self.test_info_entry.notes_ent.config(state="disabled")
-        self.test.notes = self.test_info_entry.notes_ent.get()
-        filename = f"{self.test.name}_data.csv"
-        with open(filename, mode='a', newline='') as file:
-            file.write(f"Notes: {self.test.notes}\n")
-            file.write("="*50 + "\n")
 
     def toggle_pause(self):
         """Toggle the pause/resume state."""
@@ -385,10 +391,10 @@ class TestHandler:
     def take_readings(self):
         while self.is_running and not self.request_stop:
             current_time = time.time()
-            if current_time - self.last_read_time >= 0.25: # DAQ frequency
-                self.pool.submit(self.get_strain) 
-                self.pool.submit(self.get_time) 
-                self.pool.submit(self.get_strain_rate) 
+            if current_time - self.last_read_time >= 1/(float(self.test.freq)): # Data acquisition period
+                self.pool.submit(self.get_strain)
+                self.pool.submit(self.get_time)
+                self.pool.submit(self.get_strain_rate)
                 self.pool.submit(self.get_temperature)
                 reading = Reading(
                     elapsedMin=self.elapsed_min, strain=self.strain, strainRate=self.strain_rate, temperature=self.temperature
@@ -396,7 +402,7 @@ class TestHandler:
                 self.readings.append(reading)
                 self.last_read_time = current_time
 
-            if current_time - self.last_save_time >= 5:  # Saving data frequency
+            if current_time - self.last_save_time >= 5:  # Update files period
                 # Print saved data to log
                 self.test_controls.display(f"Elapsed Time: {self.readings[-1].elapsedMin:.2f}\nStrain: {self.readings[-1].strain:.2f}\nStrain Rate: {self.readings[-1].strainRate:.2f}\nTemperature: {self.readings[-1].temperature:.2f}")
                 # Save data to csv file
@@ -407,7 +413,6 @@ class TestHandler:
     def save_to_csv(self):
         filename = f"{self.test.name}_data.csv"
         fieldnames = ['Epoch Time', 'Elapsed Time (min)', 'Strain', 'Strain Rate', 'Temperature']
-        
         with open(filename, mode='a', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             writer.writeheader() # Write header only if file doesn't exist
@@ -420,6 +425,17 @@ class TestHandler:
                     'Strain Rate': reading.strainRate,
                     'Temperature': reading.temperature
                 })
+
+        filename = f"{self.test.name}_info.csv"        
+        self.test.notes = self.test_info_entry.notes_ent.get()
+        with open(filename, mode='w', newline='') as file:
+            file.write("="*50 + "\n")
+            file.write(f"Name: {self.test.name}\n")
+            file.write(f"Material: {self.test.material}\n")
+            file.write(f"Frequency: {self.test.freq}\n")
+            file.write(f"Gauge Length: {self.test.gauge_length}\n")
+            file.write(f"Notes: {self.test.notes}\n")
+            file.write("="*50 + "\n")
 
     def get_strain(self): # calculate using gauge length and displacement
         self.strain = np.sqrt(self.elapsed_min)
