@@ -4,6 +4,7 @@ from tkinter.scrolledtext import ScrolledText
 from dataclasses import dataclass
 from typing import List
 import numpy as np
+import math
 import time, random
 
 from matplotlib.animation import FuncAnimation
@@ -30,9 +31,9 @@ class Test:
     def __init__(self):  
         self.name = tk.StringVar()
         self.material = tk.StringVar()
-        self.freq: tk.StringVar() = "100" # Can add default for commonly used values
+        self.freq = tk.StringVar()
         self.notes = tk.StringVar()
-        self.gauge_length = tk.StringVar() # Can add default for commonly used values
+        self.gauge_length = tk.StringVar()
         self.readings: List[Reading] = []
 
 
@@ -232,10 +233,10 @@ class StrainPlot(tk.Frame):
             self.strainplt.set_ylim(0, max(strain))
 
             self.line2.set_data(elapsedMin, strainRate)
-            self.strainrateplt.set_ylim(0, max(strainRate))
+            self.strainrateplt.set_ylim(min(strainRate), max(strainRate))
 
             self.line3.set_data(elapsedMin, temperature)
-            self.temperatureplt.set_ylim(0, max(temperature))
+            self.temperatureplt.set_ylim(min(temperature), max(temperature))
 
 
 class TestControls(tk.Frame):
@@ -437,11 +438,28 @@ class TestHandler:
             file.write(f"Notes: {self.test.notes}\n")
             file.write("="*50 + "\n")
 
-    def get_strain(self): # calculate using gauge length and displacement
-        self.strain = np.sqrt(self.elapsed_min)
+    # NIST Type K Thermocouple coefficients for 0°C to 1372°C
+    coefficients = [
+        0.0000000e+00,
+        2.508355e+01,
+        7.860106e-02,
+        -2.503131e-01,
+        8.315270e-02,
+        -1.228034e-02,
+        9.804036e-04,
+        -4.413030e-05,
+        1.057734e-06,
+        -1.052755e-08
+    ]
+
+    def get_strain(self):
+        # calibration?
+        self.voltage = math.sqrt(self.elapsed_min * 1000) #FIXME
+        self.displacement = (0.04897 * self.voltage) + 0.53505
+        self.strain = self.displacement / float(self.test.gauge_length) # check if need (0.0637167 / self.test.gauge_length)
 
     def get_time(self):
-        self.elapsed_min = (time.time() - self.start_time)
+        self.elapsed_min = (time.time() - self.start_time) #FIXME
     
     def get_strain_rate(self): 
         if len(self.readings) > 0:
@@ -457,7 +475,10 @@ class TestHandler:
             self.strain_rate = 0
 
     def get_temperature(self):
-        self.temperature= (self.elapsed_min) ** 2
+        self.voltage = 100 / self.elapsed_min #FIXME
+        self.temperature = 0
+        for i, coeff in enumerate(self.coefficients):
+            self.temperature += coeff * (self.voltage ** i)
 
 
 class MainFrame(tk.Frame):
