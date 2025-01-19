@@ -32,9 +32,13 @@ class Test:
         self.name = tk.StringVar()
         self.material = tk.StringVar()
         self.freq = tk.StringVar()
+        self.freq_log = []
         self.notes = tk.StringVar()
         self.gauge_length = tk.StringVar()
         self.readings: List[Reading] = []
+        self.data_file_name = ""
+        self.info_file_name = ""
+        self.last_written_index = 0
 
 
 class TestInfoEntry(tk.Frame):
@@ -323,7 +327,7 @@ class TestHandler:
         
         # Require user to enter valid input before starting test
         if (
-            (self.test.name and self.test.material and freq and gauge_length)
+            (self.test.name and self.test.material)
             and (freq > 0) and (gauge_length > 0)
         ):
             self.start_time = time.time() 
@@ -333,7 +337,6 @@ class TestHandler:
             # Disable the text boxes
             self.test_info_entry.name_ent.config(state="disabled")
             self.test_info_entry.matr_ent.config(state="disabled")
-            self.test_info_entry.freq_ent.config(state="disabled")
             self.test_info_entry.gauge_length_ent.config(state="disabled")
 
             # Disable the start button and enable the stop and pause buttons
@@ -354,6 +357,11 @@ class TestHandler:
                 temperature=self.strain
             )
             self.readings.append(first_reading)
+
+            self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": self.elapsed_min})
+
+            self.test.data_file_name = f"{self.test.name}_data.csv"
+            self.test.info_file_name = f"{self.test.name}_info.csv"
 
             self.test_controls.display("Test started.")
             self.pool.submit(self.cont_test)
@@ -403,39 +411,58 @@ class TestHandler:
                 self.readings.append(reading)
                 self.last_read_time = current_time
 
-            if current_time - self.last_save_time >= 5:  # Update files period
+            if current_time - self.last_save_time >= 5:  # Update files and frequency (if there is a change) period
                 # Print saved data to log
                 self.test_controls.display(f"Elapsed Time: {self.readings[-1].elapsedMin:.2f}\nStrain: {self.readings[-1].strain:.2f}\nStrain Rate: {self.readings[-1].strainRate:.2f}\nTemperature: {self.readings[-1].temperature:.2f}")
+                self.test_controls.display("="*44)
+
                 # Save data to csv file
                 self.save_to_csv()
                 # Update last save time
                 self.last_save_time = current_time
 
-    def save_to_csv(self):
-        filename = f"{self.test.name}_data.csv"
-        fieldnames = ['Epoch Time', 'Elapsed Time (min)', 'Strain', 'Strain Rate', 'Temperature']
-        with open(filename, mode='a', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
-            writer.writeheader() # Write header only if file doesn't exist
-            for reading in self.readings:
-                epoch_time = time.time()
-                writer.writerow({
-                    'Epoch Time': epoch_time,
-                    'Elapsed Time (min)': reading.elapsedMin,
-                    'Strain': reading.strain,
-                    'Strain Rate': reading.strainRate,
-                    'Temperature': reading.temperature
-                })
+                temp = self.test_info_entry.freq_ent.get()
+                # Try to convert frequency into float
+                try:
+                    freq = float(temp)
+                except ValueError:
+                    freq = 0
+                if freq != float(self.test.freq):
+                    if (freq > 0):
+                        self.test.freq = freq
+                        self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": self.elapsed_min})
+                        self.test_controls.display(f"Frequency changed to {self.test.freq}.")
+                    else:
+                        self.test_controls.display("Please enter valid input.")
 
-        filename = f"{self.test.name}_info.csv"        
+    def save_to_csv(self):
+        new_readings = self.readings[self.test.last_written_index:]
+        if new_readings:
+            fieldnames = ['Epoch Time', 'Elapsed Time (min)', 'Strain', 'Strain Rate', 'Temperature']
+            with open(self.test.data_file_name, mode='a', newline='') as file:
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+                if file.tell() == 0:  # If the file is empty, write header
+                    writer.writeheader()
+                for reading in new_readings:
+                    epoch_time = time.time()
+                    writer.writerow({
+                        'Epoch Time': epoch_time,
+                        'Elapsed Time (min)': reading.elapsedMin,
+                        'Strain': reading.strain,
+                        'Strain Rate': reading.strainRate,
+                        'Temperature': reading.temperature
+                    })
+            self.test.last_written_index = len(self.readings)
+
         self.test.notes = self.test_info_entry.notes_ent.get()
-        with open(filename, mode='w', newline='') as file:
+        with open(self.test.info_file_name, mode='w', newline='') as file:
             file.write("="*50 + "\n")
             file.write(f"Name: {self.test.name}\n")
             file.write(f"Material: {self.test.material}\n")
-            file.write(f"Frequency: {self.test.freq}\n")
             file.write(f"Gauge Length: {self.test.gauge_length}\n")
             file.write(f"Notes: {self.test.notes}\n")
+            for entry in self.test.freq_log:
+                file.write(f"Frequency Log: {entry['Frequency']:.2f} at {entry['Timestamp']:.2f}\n")
             file.write("="*50 + "\n")
 
     # NIST Type K Thermocouple coefficients for 0°C to 1372°C
