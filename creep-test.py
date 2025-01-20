@@ -16,6 +16,7 @@ from matplotlib.figure import SubplotParams
 from concurrent.futures import ThreadPoolExecutor
 import os
 import csv
+import webbrowser
 
 
 @dataclass
@@ -237,10 +238,16 @@ class StrainPlot(tk.Frame):
             self.strainplt.set_ylim(0, max(strain))
 
             self.line2.set_data(elapsedMin, strainRate)
-            self.strainrateplt.set_ylim(min(strainRate), max(strainRate))
+            if (min(strainRate) == max(strainRate)):
+                self.strainrateplt.set_ylim(min(strainRate), max(strainRate) + 0.1)
+            else:
+                self.strainrateplt.set_ylim(min(strainRate), max(strainRate))
 
             self.line3.set_data(elapsedMin, temperature)
-            self.temperatureplt.set_ylim(min(temperature), max(temperature))
+            if (min(temperature) == max(temperature)):
+                self.temperatureplt.set_ylim(min(temperature), max(temperature) + 0.1)
+            else:
+                self.temperatureplt.set_ylim(min(temperature), max(temperature))
 
 
 class TestControls(tk.Frame):
@@ -275,6 +282,15 @@ class TestControls(tk.Frame):
         )
         self.log_text.grid(row=1, column=0, columnspan=3, sticky="ew")
         self.display("Welcome!")
+
+        # FIXME
+        self.text_box = tk.Text(self, height=1, width=3)
+        self.text_box.insert("1.0", "Calibration")
+        self.text_box.tag_add("hyperlink", "1.0", "1.11")
+        self.text_box.tag_config("hyperlink", foreground="blue", underline=True)
+        self.text_box.tag_bind("hyperlink", "<Button-1>",lambda e: webbrowser.open("https://docs.google.com/document/d/1zfNkIwj9hVPKOLqsJrkodcGsiBNH8iFY/edit?usp=sharing&ouid=107579670681160493805&rtpof=true&sd=true"))
+        self.text_box.config(state="disabled")
+        self.text_box.grid(row=5, column=0, sticky="ew")
 
     def display(self, msg: str):
         self.log_text.configure(state="normal")
@@ -462,7 +478,7 @@ class TestHandler:
             file.write(f"Gauge Length: {self.test.gauge_length}\n")
             file.write(f"Notes: {self.test.notes}\n")
             for entry in self.test.freq_log:
-                file.write(f"Frequency Log: {entry['Frequency']:.2f} at {entry['Timestamp']:.2f}\n")
+                file.write(f"Frequency Log: {entry['Frequency']} at {entry['Timestamp']}\n")
             file.write("="*50 + "\n")
 
     # NIST Type K Thermocouple coefficients for 0°C to 1372°C
@@ -502,7 +518,7 @@ class TestHandler:
             self.strain_rate = 0
 
     def get_temperature(self):
-        self.voltage = 100 / self.elapsed_min #FIXME
+        self.voltage = self.elapsed_min #FIXME
         self.temperature = 0
         for i, coeff in enumerate(self.coefficients):
             self.temperature += coeff * (self.voltage ** i)
