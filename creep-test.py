@@ -8,7 +8,7 @@ import math
 import time, random
 
 from matplotlib.animation import FuncAnimation
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from matplotlib.figure import SubplotParams
@@ -17,7 +17,6 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 import csv
 import webbrowser
-
 
 @dataclass
 class Reading:
@@ -121,103 +120,14 @@ class StrainPlot(tk.Frame):
         self.line2, = self.strainrateplt.plot([], [])
         self.line3, = self.temperatureplt.plot([], [])
 
-        canvas = FigureCanvasTkAgg(self.fig, master=self)
-        canvas.get_tk_widget().grid(sticky="nsew")
-
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
+        self.canvas.get_tk_widget().grid(sticky="nsew", pady=(40,0))
+        
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         self.ani = FuncAnimation(self.fig, self.animate, interval=500, cache_frame_data=False) # Animation period
         self.handler.ani = self.ani
-
-        self.fig.canvas.mpl_connect('scroll_event', self.on_zoom)
-        self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_press)
-        self.fig.canvas.mpl_connect('motion_notify_event', self.on_mouse_drag)
-        self.fig.canvas.mpl_connect('button_release_event', self.on_mouse_release)
-
-        self.is_dragging = False
-        self.drag_start_x = 0
-        self.drag_start_y = 0
-
-    def on_zoom(self, event):
-        """Zoom in or out on the plot when the mouse wheel is scrolled."""
-        if self.handler.paused:  # Only allow zooming when paused
-            zoom_factor = 1.01  # The factor by which the zoom happens
-            if event.button == 'down':
-                scale = 1 / zoom_factor
-            elif event.button == 'up':
-                scale = zoom_factor
-            else:
-                return
-
-        # Get current axes limits
-        for ax in [self.strainplt, self.strainrateplt, self.temperatureplt]:
-            xlim, ylim = ax.get_xlim(), ax.get_ylim()
-
-            # Get mouse position
-            mouse_x, mouse_y = ax.transData.inverted().transform([event.x, event.y])
-            x_center = mouse_x
-            y_center = mouse_y
-
-            # Calculate the new limits based on zooming around the mouse position
-            new_xlim = [x_center - ((x_center - xlim[0]) * scale), x_center + ((xlim[1] - x_center) * scale)]
-            new_ylim = [y_center - ((y_center - ylim[0]) * scale), y_center + ((ylim[1] - y_center) * scale)]
-
-            # Apply the new zoomed limits to the axis
-            ax.set_xlim(new_xlim)
-            ax.set_ylim(new_ylim)
-
-            self.fig.canvas.draw_idle()
-
-    def on_mouse_press(self, event):
-        """Capture mouse press for panning."""
-        print("Mouse press detected.")  # Debug line
-        if self.handler.paused and event.button == 1:
-            self.is_dragging = True
-            self.drag_start_x = event.x
-            self.drag_start_y = event.y
-
-    def on_mouse_drag(self, event):
-        """Capture mouse drag for panning."""
-        if self.handler.paused and self.is_dragging:
-            dx = event.x - self.drag_start_x
-            dy = event.y - self.drag_start_y
-
-            # Get canvas width and height
-            canvas_width, canvas_height = self.fig.canvas.get_width_height()
-
-            # Get current limits
-            for ax in [self.strainplt, self.strainrateplt, self.temperatureplt]:
-                xlim, ylim = ax.get_xlim(), ax.get_ylim()
-
-                # Adjust limits based on mouse drag movement
-                new_xlim = [x - dx * (xlim[1] - xlim[0]) / canvas_width for x in xlim]
-                new_ylim = [y - dy * (ylim[1] - ylim[0]) / canvas_height for y in ylim]
-
-                # Ensure the x-axis (time) doesn't move into the negative range
-                if new_xlim[0] < 0:
-                    new_xlim[0] = 0
-                    new_xlim[1] = xlim[1]  # Preserve the upper bound of xlim
-
-                # Ensure the y-axis doesn't move into the negative range
-                if new_ylim[0] < 0:
-                    new_ylim[0] = 0
-                    new_ylim[1] = ylim[1]  # Preserve the upper bound of ylim
-
-                # Apply the new limits to axes
-                ax.set_xlim(new_xlim)
-                ax.set_ylim(new_ylim)
-
-            # Update starting mouse position for next drag
-            self.drag_start_x = event.x
-            self.drag_start_y = event.y
-
-            # Redraw the plot
-            self.fig.canvas.draw_idle()
-
-    def on_mouse_release(self, event):
-        """Stop dragging when mouse is released."""
-        self.is_dragging = False
 
     def animate(self, interval):
         if self.handler.is_running:
@@ -283,7 +193,6 @@ class TestControls(tk.Frame):
         self.log_text.grid(row=1, column=0, columnspan=3, sticky="ew")
         self.display("Welcome!")
 
-        # FIXME
         self.text_box = tk.Text(self, height=1, width=3)
         self.text_box.insert("1.0", "Calibration")
         self.text_box.tag_add("hyperlink", "1.0", "1.11")
@@ -300,7 +209,7 @@ class TestControls(tk.Frame):
 
 
 class TestHandler:
-    def __init__(self, test_controls: TestControls = None, strainplot: StrainPlot = None, test_info_entry: TestInfoEntry = None):
+    def __init__(self, test_controls: TestControls = None, strainplot: StrainPlot = None, test_info_entry: TestInfoEntry = None, toolbar = None):
         self.root: tk.Tk = strainApp.ROOT
         self.test = Test()
 
@@ -308,6 +217,7 @@ class TestHandler:
         self.test_controls = test_controls
         self.strainplot = strainplot
         self.test_info_entry = test_info_entry
+        self.toolbar = toolbar
 
         self.readings: List[Reading] = []
         self.elapsed_min: float = float()
@@ -325,6 +235,7 @@ class TestHandler:
         self.last_read_time = time.time()
 
     def start_test(self):
+        print("Started the test.")
         # Read the text entries (except notes)
         self.test.name = self.test_info_entry.name_ent.get()
         self.test.material = self.test_info_entry.matr_ent.get()
@@ -396,6 +307,7 @@ class TestHandler:
         self.test_controls.stop_btn.configure(state="disabled")
         self.ani.event_source.stop()
 
+        print("Stopped the test.")
         self.test_controls.display("Test stopped.")
         self.test_info_entry.notes_ent.config(state="disabled")
 
@@ -407,6 +319,7 @@ class TestHandler:
             self.test_controls.display("Test paused.")
             self.test_controls.pause_btn.configure(text="Resume")
             self.ani.event_source.stop()
+
         else:
             print("Resumed the test.")
             self.test_controls.display("Test resumed.")
@@ -497,7 +410,7 @@ class TestHandler:
 
     def get_strain(self):
         # calibration?
-        self.voltage = math.sqrt(self.elapsed_min * 1000) #FIXME
+        self.voltage = math.sqrt(self.elapsed_min * 10000) #FIXME
         self.displacement = (0.04897 * self.voltage) + 0.53505
         self.strain = self.displacement / float(self.test.gauge_length) # check if need (0.0637167 / self.test.gauge_length)
 
@@ -505,7 +418,7 @@ class TestHandler:
         self.elapsed_min = (time.time() - self.start_time) #FIXME
     
     def get_strain_rate(self): 
-        if len(self.readings) > 0:
+        if len(self.readings) > 1:
             strain_diff = self.strain - self.readings[-1].strain
             time_diff = self.elapsed_min - self.readings[-1].elapsedMin
 
@@ -518,7 +431,7 @@ class TestHandler:
             self.strain_rate = 0
 
     def get_temperature(self):
-        self.voltage = self.elapsed_min #FIXME
+        self.voltage = (self.elapsed_min % 3) #FIXME
         self.temperature = 0
         for i, coeff in enumerate(self.coefficients):
             self.temperature += coeff * (self.voltage ** i)
@@ -529,7 +442,7 @@ class MainFrame(tk.Frame):
     def __init__(self, parent: tk.Frame):
         super().__init__(parent)
         self.parent: tk.Frame = parent
-        self.handler = TestHandler(test_controls=None, test_info_entry=None)
+        self.handler = TestHandler(test_controls=None, test_info_entry=None, toolbar=None)
         self.strainplot: StrainPlot = None
         self.build()
 
@@ -549,6 +462,12 @@ class MainFrame(tk.Frame):
         self.strainplot.grid(row=0, column=0, sticky="nsew")
         plt_frm.grid(row=0, column=1, rowspan=2)
         self.handler.strainplot = self.strainplot
+
+        # above strainplot
+        self.toolbar = NavigationToolbar2Tk(self.strainplot.canvas, self, pack_toolbar=False)
+        self.toolbar.update()
+        self.toolbar.place(x=600, y=0, relwidth=1)
+        self.handler.toolbar = self.toolbar
 
         # row 1 ---------------------------------------------
         test_controls = TestControls(self, self.handler)
@@ -579,7 +498,7 @@ def main():
     root = tk.Tk()
     root.title("Creep Test")
     strainApp.ROOT = root
-    root.geometry("1000x600") # window size
+    root.geometry("1000x650") # window size
     strainApp(root).grid(sticky="nsew")
     root.mainloop()
 
