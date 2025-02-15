@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 import csv
 import webbrowser
+import pyvisa
 
 @dataclass
 class Reading:
@@ -235,7 +236,6 @@ class TestHandler:
         self.last_read_time = time.time()
 
     def start_test(self):
-        print("Started the test.")
         # Read the text entries (except notes)
         self.test.name = self.test_info_entry.name_ent.get()
         self.test.material = self.test_info_entry.matr_ent.get()
@@ -272,7 +272,7 @@ class TestHandler:
                 self.test_controls.stop_btn.configure(state="normal")
                 self.test_controls.pause_btn.configure(state="normal")
 
-            # Initialize the first reading
+            # Initialize the first reading FIXME
             self.elapsed_min = 0.0
             self.strain = 0.0
             self.strain_rate = 0.0
@@ -290,7 +290,19 @@ class TestHandler:
             self.test.data_file_name = f"{self.test.name}_data.csv"
             self.test.info_file_name = f"{self.test.name}_info.csv"
 
+            # I/O
+            self.rm = pyvisa.ResourceManager()
+            resources = self.rm.list_resources()
+            print(resources)
+
+            self.daq = self.rm.open_resource('GPIB0::9::INSTR')
+
+            available_channels = self.daq.query('INST:LIST?')
+            print(f"Available Channels: {available_channels}")
+            # END
+
             self.test_controls.display("Test started.")
+            print("Started the test.")
             self.pool.submit(self.cont_test)
         else:
             self.test_controls.display("Please enter valid input.")
@@ -310,6 +322,8 @@ class TestHandler:
         print("Stopped the test.")
         self.test_controls.display("Test stopped.")
         self.test_info_entry.notes_ent.config(state="disabled")
+
+        self.daq.close()
 
     def toggle_pause(self):
         """Toggle the pause/resume state."""
