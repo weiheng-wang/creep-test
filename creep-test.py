@@ -299,6 +299,10 @@ class TestHandler:
 
             available_channels = self.daq.query('INST:LIST?')
             print(f"Available Channels: {available_channels}")
+
+            #self.daq.write('INST:SCAN ON') # turn on scanning mode
+            #self.daq.write('INST:SEL:CHAN 1')  # Select channel TBD
+            #self.daq.write('INST:SEL:CHAN 2')  # Select channel TBD
             # END
 
             self.test_controls.display("Test started.")
@@ -323,6 +327,7 @@ class TestHandler:
         self.test_controls.display("Test stopped.")
         self.test_info_entry.notes_ent.config(state="disabled")
 
+        #self.daq.write('INST:SCAN OFF') turn off scanning mode
         self.daq.close()
 
     def toggle_pause(self):
@@ -344,6 +349,12 @@ class TestHandler:
         while self.is_running and not self.request_stop:
             current_time = time.time()
             if current_time - self.last_read_time >= 1/(float(self.test.freq)): # Data acquisition period
+                
+                latest_data = self.daq.query('FETCh?') # Fetch latest data, may have to select channels first
+                print(f"Raw data: {latest_data}") # FIRST CHECK THE FORMAT, string or array, singular or multiple values
+                self.strainVoltage = 0 #latest_data[0] FIXME
+                self.temperatureVoltage = 0 #latest_data[1] FIXME
+
                 self.pool.submit(self.get_strain)
                 self.pool.submit(self.get_time)
                 self.pool.submit(self.get_strain_rate)
@@ -423,13 +434,11 @@ class TestHandler:
     ]
 
     def get_strain(self):
-        # calibration?
-        self.voltage = math.sqrt(self.elapsed_min * 10000) #FIXME
-        self.displacement = (0.04897 * self.voltage) + 0.53505
+        self.displacement = (0.04897 * self.strainVoltage) + 0.53505
         self.strain = self.displacement / float(self.test.gauge_length) # check if need (0.0637167 / self.test.gauge_length)
 
     def get_time(self):
-        self.elapsed_min = (time.time() - self.start_time) #FIXME
+        self.elapsed_min = (time.time() - self.start_time)
     
     def get_strain_rate(self): 
         if len(self.readings) > 1:
@@ -445,10 +454,9 @@ class TestHandler:
             self.strain_rate = 0
 
     def get_temperature(self):
-        self.voltage = (self.elapsed_min % 3) #FIXME
         self.temperature = 0
         for i, coeff in enumerate(self.coefficients):
-            self.temperature += coeff * (self.voltage ** i)
+            self.temperature += coeff * (self.temperatureVoltage ** i)
 
 
 class MainFrame(tk.Frame):
