@@ -144,21 +144,29 @@ class StrainPlot(tk.Frame):
                 strainRate.append(reading.strainRate)
                 temperature.append(reading.temperature)
 
-            self.line1.set_data(elapsedMin, strain)
-            self.strainplt.set_xlim(0, elapsedMin[-1]) # x-axes are shared
-            self.strainplt.set_ylim(0, max(strain))
+            if readings:
+                if (min(elapsedMin) == max(elapsedMin)):
+                    self.strainplt.set_xlim(min(elapsedMin), max(elapsedMin) + 0.1) # x-axes are shared
+                else:
+                    self.strainplt.set_xlim(min(elapsedMin), max(elapsedMin)) # x-axes are shared
 
-            self.line2.set_data(elapsedMin, strainRate)
-            if (min(strainRate) == max(strainRate)):
-                self.strainrateplt.set_ylim(min(strainRate), max(strainRate) + 0.1)
-            else:
-                self.strainrateplt.set_ylim(min(strainRate), max(strainRate))
+                self.line1.set_data(elapsedMin, strain)
+                if (min(strain) == max(strain)):
+                    self.strainplt.set_ylim(min(strain), max(strain) + 0.1)
+                else:
+                    self.strainplt.set_ylim(min(strain), max(strain))
+                
+                self.line2.set_data(elapsedMin, strainRate)
+                if (min(strainRate) == max(strainRate)):
+                    self.strainrateplt.set_ylim(min(strainRate), max(strainRate) + 0.1)
+                else:
+                    self.strainrateplt.set_ylim(min(strainRate), max(strainRate))
 
-            self.line3.set_data(elapsedMin, temperature)
-            if (min(temperature) == max(temperature)):
-                self.temperatureplt.set_ylim(min(temperature), max(temperature) + 0.1)
-            else:
-                self.temperatureplt.set_ylim(min(temperature), max(temperature))
+                self.line3.set_data(elapsedMin, temperature)
+                if (min(temperature) == max(temperature)):
+                    self.temperatureplt.set_ylim(min(temperature), max(temperature) + 0.1)
+                else:
+                    self.temperatureplt.set_ylim(min(temperature), max(temperature))
 
 
 class TestControls(tk.Frame):
@@ -272,19 +280,6 @@ class TestHandler:
                 self.test_controls.stop_btn.configure(state="normal")
                 self.test_controls.pause_btn.configure(state="normal")
 
-            # Initialize the first reading FIXME
-            self.elapsed_min = 0.0
-            self.strain = 0.0
-            self.strain_rate = 0.0
-            self.temperature = 0.0
-            first_reading = Reading(
-                elapsedMin=self.elapsed_min,
-                strain=self.strain,
-                strainRate=self.strain_rate,
-                temperature=self.strain
-            )
-            self.readings.append(first_reading)
-
             self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": self.elapsed_min})
 
             self.test.data_file_name = f"{self.test.name}_data.csv"
@@ -295,6 +290,7 @@ class TestHandler:
             resources = self.rm.list_resources()
             print(resources)
             self.daq = self.rm.open_resource('GPIB0::9::INSTR')
+            print("DAQ open")
             self.daq.timeout = 5000
             # END
 
@@ -321,6 +317,7 @@ class TestHandler:
         self.test_info_entry.notes_ent.config(state="disabled")
 
         self.daq.close()
+        print("DAQ closed")
 
     def toggle_pause(self):
         """Toggle the pause/resume state."""
@@ -421,7 +418,7 @@ class TestHandler:
 
     def get_strain(self):
         strainVoltage = float(self.daq.query("AI2")) # channel 2
-        print(strainVoltage) # debug
+        print(f"Voltage: {strainVoltage}") # debug
         self.displacement = (0.04897 * strainVoltage) + 0.53505
         self.strain = self.displacement / float(self.test.gauge_length)
 
@@ -443,7 +440,7 @@ class TestHandler:
 
     def get_temperature(self):
         temperatureVoltage = float(self.daq.query("AI1")) # placeholder channel
-        print(temperatureVoltage) # debug
+        print(f"Temperature: {temperatureVoltage}") # debug
         self.temperature = 0
         for i, coeff in enumerate(self.coefficients):
             self.temperature += coeff * (temperatureVoltage ** i)
