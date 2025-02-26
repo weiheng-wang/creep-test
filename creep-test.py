@@ -18,7 +18,12 @@ import os
 import csv
 import webbrowser
 import pyvisa
-
+'''
+- find right channel for temperature
+- figure out changing channels query issue
+- try lower frequency
+- improve efficiency
+'''
 @dataclass
 class Reading:
     elapsedMin: float
@@ -121,6 +126,10 @@ class StrainPlot(tk.Frame):
         self.line2, = self.strainrateplt.plot([], [])
         self.line3, = self.temperatureplt.plot([], [])
 
+        self.strain_min = self.strain_max = None
+        self.sr_min = self.sr_max = None
+        self.temp_min = self.temp_max = None
+
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         self.canvas.get_tk_widget().grid(sticky="nsew", pady=(40,0))
         
@@ -132,41 +141,59 @@ class StrainPlot(tk.Frame):
 
     def animate(self, interval):
         if self.handler.is_running:
-            elapsedMin = []
-            strain = []
-            strainRate = []
-            temperature = []
-            readings = tuple(self.handler.readings)
+
+            readings = self.handler.readings
+            if not readings:
+                return
+
+            elapsedMin, strain, strainRate, temperature = [], [], [], []
 
             for reading in readings:
-                elapsedMin.append(reading.elapsedMin)
-                strain.append(reading.strain)
-                strainRate.append(reading.strainRate)
-                temperature.append(reading.temperature)
+                em = reading.elapsedMin
+                s = reading.strain
+                sr = reading.strainRate
+                t = reading.temperature
 
-            if readings:
-                if (min(elapsedMin) == max(elapsedMin)):
-                    self.strainplt.set_xlim(min(elapsedMin), max(elapsedMin) + 0.1) # x-axes are shared
-                else:
-                    self.strainplt.set_xlim(min(elapsedMin), max(elapsedMin)) # x-axes are shared
+                elapsedMin.append(em)
+                strain.append(s)
+                strainRate.append(sr)
+                temperature.append(t)
 
-                self.line1.set_data(elapsedMin, strain)
-                if (min(strain) == max(strain)):
-                    self.strainplt.set_ylim(min(strain), max(strain) + 0.1)
-                else:
-                    self.strainplt.set_ylim(min(strain), max(strain))
-                
-                self.line2.set_data(elapsedMin, strainRate)
-                if (min(strainRate) == max(strainRate)):
-                    self.strainrateplt.set_ylim(min(strainRate), max(strainRate) + 0.1)
-                else:
-                    self.strainrateplt.set_ylim(min(strainRate), max(strainRate))
+            # Track strain min/max
+            if self.strain_min is None or s < self.strain_min:
+                self.strain_min = s
+            if self.strain_max is None or s > self.strain_max:
+                self.strain_max = s
+            # Track strain rate min/max
+            if self.sr_min is None or sr < self.sr_min:
+                self.sr_min = sr
+            if self.sr_max is None or sr > self.sr_max:
+                self.sr_max = sr
+            # Track temperature min/max
+            if self.temp_min is None or t < self.temp_min:
+                self.temp_min = t
+            if self.temp_max is None or t > self.temp_max:
+                self.temp_max = t
 
-                self.line3.set_data(elapsedMin, temperature)
-                if (min(temperature) == max(temperature)):
-                    self.temperatureplt.set_ylim(min(temperature), max(temperature) + 0.1)
-                else:
-                    self.temperatureplt.set_ylim(min(temperature), max(temperature))
+            # Set X-axis limits using first and last elements (efficient for ordered data)
+            x_min, x_max = elapsedMin[0], elapsedMin[-1]
+            if x_min == x_max:
+                x_max += 0.1  # Avoid zero range
+            self.strainplt.set_xlim(x_min, x_max)  # Shared x-axis
+
+            # Update plot data
+            self.line1.set_data(elapsedMin, strain)
+            self.line2.set_data(elapsedMin, strainRate)
+            self.line3.set_data(elapsedMin, temperature)
+
+            # Helper to handle y-axis limits when min == max
+            def get_ylim(data_min, data_max):
+                return (data_min, data_max + 0.1) if data_min == data_max else (data_min, data_max)
+
+            # Set Y-axis limits
+            self.strainplt.set_ylim(get_ylim(self.strain_min, self.strain_max))
+            self.strainrateplt.set_ylim(get_ylim(self.sr_min, self.sr_max))
+            self.temperatureplt.set_ylim(get_ylim(self.temp_min, self.temp_max))
 
 
 class TestControls(tk.Frame):
@@ -280,19 +307,32 @@ class TestHandler:
                 self.test_controls.stop_btn.configure(state="normal")
                 self.test_controls.pause_btn.configure(state="normal")
 
+            # Initialize the first reading FIXME
+            self.elapsed_min = 0.0
+            self.strain = 0.0
+            self.strain_rate = 0.0
+            self.temperature = 0.0
+            first_reading = Reading(
+                elapsedMin=self.elapsed_min,
+                strain=self.strain,
+                strainRate=self.strain_rate,
+                temperature=self.strain
+            )
+            self.readings.append(first_reading)
+
             self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": self.elapsed_min})
 
             self.test.data_file_name = f"{self.test.name}_data.csv"
             self.test.info_file_name = f"{self.test.name}_info.csv"
 
-            # I/O
+            '''# I/O
             self.rm = pyvisa.ResourceManager()
             resources = self.rm.list_resources()
             print(resources)
             self.daq = self.rm.open_resource('GPIB0::9::INSTR')
             print("DAQ open")
             self.daq.timeout = 5000
-            # END
+            # END'''
 
             self.test_controls.display("Test started.")
             print("Started the test.")
@@ -316,8 +356,8 @@ class TestHandler:
         self.test_controls.display("Test stopped.")
         self.test_info_entry.notes_ent.config(state="disabled")
 
-        self.daq.close()
-        print("DAQ closed")
+        '''self.daq.close()
+        print("DAQ closed")''' #I/O
 
     def toggle_pause(self):
         """Toggle the pause/resume state."""
@@ -338,8 +378,8 @@ class TestHandler:
         while self.is_running and not self.request_stop:
             current_time = time.time()
             if current_time - self.last_read_time >= 1/(float(self.test.freq)): # Data acquisition period
-                self.pool.submit(self.get_strain)
                 self.pool.submit(self.get_time)
+                self.pool.submit(self.get_strain)
                 self.pool.submit(self.get_strain_rate)
                 self.pool.submit(self.get_temperature)
                 reading = Reading(
@@ -416,14 +456,15 @@ class TestHandler:
         -1.052755e-08
     ]
 
-    def get_strain(self):
-        strainVoltage = float(self.daq.query("AI2")) # channel 2
-        print(f"Voltage: {strainVoltage}") # debug
-        self.displacement = (0.04897 * strainVoltage) + 0.53505
-        self.strain = self.displacement / float(self.test.gauge_length)
-
     def get_time(self):
         self.elapsed_min = (time.time() - self.start_time)
+
+    def get_strain(self):
+        strainVoltage = math.sqrt(self.elapsed_min * 10000) #FIXME
+        #strainVoltage = float(self.daq.query("AI2")) # channel 2 I/O
+        print(f"Strain: {strainVoltage}") # debug
+        self.displacement = (0.04897 * strainVoltage) + 0.53505
+        self.strain = self.displacement / float(self.test.gauge_length)
     
     def get_strain_rate(self): 
         if len(self.readings) > 1:
@@ -439,7 +480,8 @@ class TestHandler:
             self.strain_rate = 0
 
     def get_temperature(self):
-        temperatureVoltage = float(self.daq.query("AI1")) # placeholder channel
+        temperatureVoltage = (self.elapsed_min % 3)
+        #temperatureVoltage = float(self.daq.query("AI1")) # placeholder channel I/O
         print(f"Temperature: {temperatureVoltage}") # debug
         self.temperature = 0
         for i, coeff in enumerate(self.coefficients):
