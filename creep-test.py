@@ -24,13 +24,6 @@ import pyvisa
 - try lower frequency
 - improve efficiency
 '''
-@dataclass
-class Reading:
-    elapsedMin: float
-    strain: float 
-    strainRate: float
-    temperature: float
-
 
 class Test:
     """Object for holding all the data associated with a Test."""
@@ -41,7 +34,6 @@ class Test:
         self.freq_log = []
         self.notes = tk.StringVar()
         self.gauge_length = tk.StringVar()
-        self.readings: List[Reading] = []
         self.data_file_name = ""
         self.info_file_name = ""
         self.last_written_index = 0
@@ -141,59 +133,34 @@ class StrainPlot(tk.Frame):
 
     def animate(self, interval):
         if self.handler.is_running:
-
-            readings = self.handler.readings
-            if not readings:
+            if self.handler.idx == 0:
                 return
 
-            elapsedMin, strain, strainRate, temperature = [], [], [], []
-
-            for reading in readings:
-                em = reading.elapsedMin
-                s = reading.strain
-                sr = reading.strainRate
-                t = reading.temperature
-
-                elapsedMin.append(em)
-                strain.append(s)
-                strainRate.append(sr)
-                temperature.append(t)
-
-            # Track strain min/max
-            if self.strain_min is None or s < self.strain_min:
-                self.strain_min = s
-            if self.strain_max is None or s > self.strain_max:
-                self.strain_max = s
-            # Track strain rate min/max
-            if self.sr_min is None or sr < self.sr_min:
-                self.sr_min = sr
-            if self.sr_max is None or sr > self.sr_max:
-                self.sr_max = sr
-            # Track temperature min/max
-            if self.temp_min is None or t < self.temp_min:
-                self.temp_min = t
-            if self.temp_max is None or t > self.temp_max:
-                self.temp_max = t
-
             # Set X-axis limits using first and last elements (efficient for ordered data)
-            x_min, x_max = elapsedMin[0], elapsedMin[-1]
-            if x_min == x_max:
-                x_max += 0.1  # Avoid zero range
+            x_min = 0
+            x_max = self.handler.elapsedMin[self.handler.idx - 1]
             self.strainplt.set_xlim(x_min, x_max)  # Shared x-axis
 
             # Update plot data
-            self.line1.set_data(elapsedMin, strain)
-            self.line2.set_data(elapsedMin, strainRate)
-            self.line3.set_data(elapsedMin, temperature)
+            self.line1.set_data(self.handler.elapsedMin, self.handler.strain)
+            self.line2.set_data(self.handler.elapsedMin, self.handler.strainRate)
+            self.line3.set_data(self.handler.elapsedMin, self.handler.temperature)
 
-            # Helper to handle y-axis limits when min == max
-            def get_ylim(data_min, data_max):
-                return (data_min, data_max + 0.1) if data_min == data_max else (data_min, data_max)
+            # Auto-scale Y axes
+            def get_ylim(arr):
+                if arr.size == 0 or np.isnan(arr).all():  # Handle empty or all-NaN arrays
+                    return (0, 0.1)  # Default y-axis range
 
-            # Set Y-axis limits
-            self.strainplt.set_ylim(get_ylim(self.strain_min, self.strain_max))
-            self.strainrateplt.set_ylim(get_ylim(self.sr_min, self.sr_max))
-            self.temperatureplt.set_ylim(get_ylim(self.temp_min, self.temp_max))
+                arr_min, arr_max = np.nanmin(arr), np.nanmax(arr)
+
+                if arr_min == arr_max:  # Prevent zero range
+                    return (arr_min, arr_max + 0.1)
+
+                return (arr_min, arr_max)
+            
+            self.strainplt.set_ylim(*get_ylim(self.handler.strain))
+            self.strainrateplt.set_ylim(*get_ylim(self.handler.strainRate))
+            self.temperatureplt.set_ylim(*get_ylim(self.handler.temperature))
 
 
 class TestControls(tk.Frame):
@@ -255,11 +222,6 @@ class TestHandler:
         self.test_info_entry = test_info_entry
         self.toolbar = toolbar
 
-        self.readings: List[Reading] = []
-        self.elapsed_min: float = float()
-        self.strain: float = float()
-        self.strain_rate: float = float()
-
         # Initialize flags
         self.is_running = False
         self.request_stop = False
@@ -269,7 +231,7 @@ class TestHandler:
         self.ani = None
         self.last_save_time = time.time()
         self.last_read_time = time.time()
-
+        
     def start_test(self):
         # Read the text entries (except notes)
         self.test.name = self.test_info_entry.name_ent.get()
@@ -307,20 +269,18 @@ class TestHandler:
                 self.test_controls.stop_btn.configure(state="normal")
                 self.test_controls.pause_btn.configure(state="normal")
 
-            # Initialize the first reading FIXME
-            self.elapsed_min = 0.0
-            self.strain = 0.0
-            self.strain_rate = 0.0
-            self.temperature = 0.0
-            first_reading = Reading(
-                elapsedMin=self.elapsed_min,
-                strain=self.strain,
-                strainRate=self.strain_rate,
-                temperature=self.strain
-            )
-            self.readings.append(first_reading)
+            initial_capacity = 100
+            self.capacity = initial_capacity # initial capacity
+            self.idx = 0  # Current number of valid readings
+            
+            # Initialize arrays with NaN (to distinguish empty slots)
+            self.timestamps = np.full(initial_capacity, np.nan, dtype=np.float64)
+            self.elapsedMin = np.full(initial_capacity, np.nan, dtype=np.float32)
+            self.strain = np.full(initial_capacity, np.nan, dtype=np.float32)
+            self.strainRate = np.full(initial_capacity, np.nan, dtype=np.float32)
+            self.temperature = np.full(initial_capacity, np.nan, dtype=np.float32)
 
-            self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": self.elapsed_min})
+            self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": 0})
 
             self.test.data_file_name = f"{self.test.name}_data.csv"
             self.test.info_file_name = f"{self.test.name}_info.csv"
@@ -374,23 +334,45 @@ class TestHandler:
             self.test_controls.pause_btn.configure(text="Pause")
             self.ani.event_source.start()
 
+    def _resize_arrays(self, new_capacity):
+        """Double array size while preserving existing data (amortized O(1) time)."""
+        def resize(arr):
+            new_arr = np.full(new_capacity, np.nan, dtype=arr.dtype)
+            new_arr[:self.idx] = arr[:self.idx]
+            return new_arr
+        
+        self.timestamps = resize(self.timestamps)
+        self.elapsedMin = resize(self.elapsedMin)
+        self.strain = resize(self.strain)
+        self.strainRate = resize(self.strainRate)
+        self.temperature = resize(self.temperature)
+        self.capacity = new_capacity
+
     def take_readings(self):
         while self.is_running and not self.request_stop:
             current_time = time.time()
             if current_time - self.last_read_time >= 1/(float(self.test.freq)): # Data acquisition period
-                self.pool.submit(self.get_time)
-                self.pool.submit(self.get_strain)
-                self.pool.submit(self.get_strain_rate)
-                self.pool.submit(self.get_temperature)
-                reading = Reading(
-                    elapsedMin=self.elapsed_min, strain=self.strain, strainRate=self.strain_rate, temperature=self.temperature
-                )
-                self.readings.append(reading)
+                if self.idx >= self.capacity:
+                    self._resize_arrays(2 * self.capacity)
+                    print("Doubled size of arrays")
+                
+                self.timestamps[self.idx] = current_time
+                self.elapsedMin[self.idx] = self.get_time(current_time)
+                self.strain[self.idx] = self.get_strain()
+                if self.idx < 1:
+                    self.strainRate[self.idx] = 0
+                else:
+                    strainDiff = self.strain[self.idx] - self.strain[self.idx - 1]
+                    timeDiff = current_time - self.elapsedMin[self.idx - 1]
+                    self.strainRate[self.idx] = self.get_strain_rate(strainDiff, timeDiff)
+                self.temperature[self.idx] = self.get_temperature()
+                self.idx += 1
+
                 self.last_read_time = current_time
 
             if current_time - self.last_save_time >= 5:  # Update files and frequency (if there is a change) period
                 # Print saved data to log
-                self.test_controls.display(f"Elapsed Time: {self.readings[-1].elapsedMin:.2f}\nStrain: {self.readings[-1].strain:.2f}\nStrain Rate: {self.readings[-1].strainRate:.2f}\nTemperature: {self.readings[-1].temperature:.2f}")
+                self.test_controls.display(f"Elapsed Time: {self.elapsedMin[self.idx - 1]:.2f}\nStrain: {self.strain[self.idx - 1]:.2f}\nStrain Rate: {self.strainRate[self.idx - 1]:.2f}\nTemperature: {self.temperature[self.idx - 1]:.2f}")
                 self.test_controls.display("="*44)
 
                 # Save data to csv file
@@ -407,29 +389,45 @@ class TestHandler:
                 if freq != float(self.test.freq):
                     if (freq > 0):
                         self.test.freq = freq
-                        self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": self.elapsed_min})
+                        self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": self.elapsedMin[self.idx - 1]})
                         self.test_controls.display(f"Frequency changed to {self.test.freq}.")
                     else:
                         self.test_controls.display("Please enter valid input.")
 
     def save_to_csv(self):
-        new_readings = self.readings[self.test.last_written_index:]
-        if new_readings:
-            fieldnames = ['Epoch Time', 'Elapsed Time (min)', 'Strain', 'Strain Rate', 'Temperature']
+        # Get current data index and last saved index
+        current_idx = self.idx
+        start_idx = self.test.last_written_index
+        
+        # Only proceed if there's new data
+        if start_idx < current_idx:
+            # Extract new data slices directly from numpy arrays
+            new_timestamps = self.timestamps[start_idx:current_idx]
+            new_elapsed = self.elapsedMin[start_idx:current_idx]
+            new_strain = self.strain[start_idx:current_idx]
+            new_strain_rate = self.strainRate[start_idx:current_idx]
+            new_temp = self.temperature[start_idx:current_idx]
+
+            fieldnames = ['Epoch Time', 'Elapsed Time (min)', 'Strain', 
+                        'Strain Rate', 'Temperature']
+            
             with open(self.test.data_file_name, mode='a', newline='') as file:
                 writer = csv.DictWriter(file, fieldnames=fieldnames)
-                if file.tell() == 0:  # If the file is empty, write header
+                
+                # Write header only for empty files
+                if file.tell() == 0:
                     writer.writeheader()
-                for reading in new_readings:
-                    epoch_time = time.time()
+
+                # Write all new entries
+                for i in range(len(new_elapsed)):
                     writer.writerow({
-                        'Epoch Time': epoch_time,
-                        'Elapsed Time (min)': reading.elapsedMin,
-                        'Strain': reading.strain,
-                        'Strain Rate': reading.strainRate,
-                        'Temperature': reading.temperature
+                        'Epoch Time': new_timestamps[i],  
+                        'Elapsed Time (min)': new_elapsed[i],
+                        'Strain': new_strain[i],
+                        'Strain Rate': new_strain_rate[i],
+                        'Temperature': new_temp[i]
                     })
-            self.test.last_written_index = len(self.readings)
+            self.test.last_written_index = current_idx
 
         self.test.notes = self.test_info_entry.notes_ent.get()
         with open(self.test.info_file_name, mode='w', newline='') as file:
@@ -456,36 +454,29 @@ class TestHandler:
         -1.052755e-08
     ]
 
-    def get_time(self):
-        self.elapsed_min = (time.time() - self.start_time)
+    def get_time(self, time):
+        return time - self.start_time
 
     def get_strain(self):
-        strainVoltage = math.sqrt(self.elapsed_min * 10000) #FIXME
+        strainVoltage = np.random.random() #FIXME
         #strainVoltage = float(self.daq.query("AI2")) # channel 2 I/O
         print(f"Strain: {strainVoltage}") # debug
-        self.displacement = (0.04897 * strainVoltage) + 0.53505
-        self.strain = self.displacement / float(self.test.gauge_length)
+        displacement = (0.04897 * strainVoltage) + 0.53505
+        strain = displacement / float(self.test.gauge_length)
+        return strain
     
-    def get_strain_rate(self): 
-        if len(self.readings) > 1:
-            strain_diff = self.strain - self.readings[-1].strain
-            time_diff = self.elapsed_min - self.readings[-1].elapsedMin
-
-            if time_diff > 0: # Avoid division by zero
-                self.strain_rate = strain_diff / time_diff
-            else:
-                self.strain_rate = 0
-
-        else:
-            self.strain_rate = 0
+    def get_strain_rate(self, strainDiff, timeDiff):
+        strain_rate = strainDiff / timeDiff
+        return strain_rate
 
     def get_temperature(self):
-        temperatureVoltage = (self.elapsed_min % 3)
+        temperatureVoltage = np.random.random() #FIXME
         #temperatureVoltage = float(self.daq.query("AI1")) # placeholder channel I/O
         print(f"Temperature: {temperatureVoltage}") # debug
-        self.temperature = 0
+        temperature = 0
         for i, coeff in enumerate(self.coefficients):
-            self.temperature += coeff * (temperatureVoltage ** i)
+            temperature += coeff * (temperatureVoltage ** i)
+        return temperature
 
 
 class MainFrame(tk.Frame):
