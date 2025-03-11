@@ -248,6 +248,23 @@ class TestHandler:
             (self.test.name and self.test.material)
             and (freq > 0) and (gauge_length > 0)
         ):
+            self.rm = pyvisa.ResourceManager()
+            resources = self.rm.list_resources()
+            print(resources)
+
+            self.daq = self.rm.open_resource('GPIB0::9::INSTR')
+            print("DAQ open")
+            self.daq.timeout = 5000
+
+            self.voltmeter = self.rm.open_resource('GPIB0::8::INSTR')
+            print("Voltmeter open")
+
+            #check status signal, if close to 0 then print smth and return... OR turn on the current, ask prof how it should work
+            status = float(self.daq.query("AI0")) # channel 0
+            if (abs(status) <= 0.001):
+                self.test_controls.display("Please prepare machine for test.")
+                return
+            
             self.start_time = time.time() 
             self.is_running = True
             self.paused = False
@@ -278,23 +295,6 @@ class TestHandler:
 
             self.test.data_file_name = f"{self.test.name}_data.csv"
             self.test.info_file_name = f"{self.test.name}_info.csv"
-
-            self.rm = pyvisa.ResourceManager()
-            resources = self.rm.list_resources()
-            print(resources)
-
-            self.daq = self.rm.open_resource('GPIB0::9::INSTR')
-            print("DAQ open")
-            self.daq.timeout = 5000
-
-            self.voltmeter = self.rm.open_resource('GPIB0::8::INSTR')
-            print("Voltmeter open")
-
-            #check status signal, if close to 0 then print smth and return... OR turn on the current, ask prof how it should work
-            status = float(self.daq.query("AI0")) # channel 0
-            if (abs(status) <= 0.001):
-                self.test_controls.display("Please prepare machine for test.")
-                return
 
             self.test_controls.display("Test started.")
             print("Started the test.")
