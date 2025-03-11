@@ -18,12 +18,6 @@ import os
 import csv
 import webbrowser
 import pyvisa
-'''
-- find right channel for temperature
-- figure out changing channels query issue
-- try lower frequency
-- improve efficiency
-'''
 
 class Test:
     """Object for holding all the data associated with a Test."""
@@ -285,14 +279,22 @@ class TestHandler:
             self.test.data_file_name = f"{self.test.name}_data.csv"
             self.test.info_file_name = f"{self.test.name}_info.csv"
 
-            '''# I/O
             self.rm = pyvisa.ResourceManager()
             resources = self.rm.list_resources()
             print(resources)
+
             self.daq = self.rm.open_resource('GPIB0::9::INSTR')
             print("DAQ open")
             self.daq.timeout = 5000
-            # END'''
+
+            self.voltmeter = self.rm.open_resource('GPIB0::8::INSTR')
+            print("Voltmeter open")
+
+            #check status signal, if close to 0 then print smth and return... OR turn on the current, ask prof how it should work
+            status = float(self.daq.query("AI0")) # channel 0
+            if (abs(status) <= 0.001):
+                self.test_controls.display("Please prepare machine for test.")
+                return
 
             self.test_controls.display("Test started.")
             print("Started the test.")
@@ -316,8 +318,10 @@ class TestHandler:
         self.test_controls.display("Test stopped.")
         self.test_info_entry.notes_ent.config(state="disabled")
 
-        '''self.daq.close()
-        print("DAQ closed")''' #I/O
+        self.daq.close()
+        print("DAQ closed")
+        self.voltmeter.close()
+        print("Voltmeter closed")
 
     def toggle_pause(self):
         """Toggle the pause/resume state."""
@@ -371,6 +375,13 @@ class TestHandler:
                 self.last_read_time = current_time
 
             if current_time - self.last_save_time >= 5:  # Update files and frequency (if there is a change) period
+                #if status voltage close to 0 then stop
+                status = float(self.daq.query("AI0")) # channel 0
+                if (abs(status) <= 0.001):
+                    self.test_controls.display("Test over")
+                    self.stop_test()
+                    return
+
                 # Print saved data to log
                 self.test_controls.display(f"Elapsed Time: {self.elapsedMin[self.idx - 1]:.2f}\nStrain: {self.strain[self.idx - 1]:.2f}\nStrain Rate: {self.strainRate[self.idx - 1]:.2f}\nTemperature: {self.temperature[self.idx - 1]:.2f}")
                 self.test_controls.display("="*44)
@@ -458,9 +469,8 @@ class TestHandler:
         return time - self.start_time
 
     def get_strain(self):
-        strainVoltage = np.random.random() #FIXME
-        #strainVoltage = float(self.daq.query("AI2")) # channel 2 I/O
-        print(f"Strain: {strainVoltage}") # debug
+        strainVoltage = float(self.daq.query("AI2")) # channel 2
+        print(f"Strain: {strainVoltage}")
         displacement = (0.04897 * strainVoltage) + 0.53505
         strain = displacement / float(self.test.gauge_length)
         return strain
@@ -470,9 +480,9 @@ class TestHandler:
         return strain_rate
 
     def get_temperature(self):
-        temperatureVoltage = np.random.random() #FIXME
-        #temperatureVoltage = float(self.daq.query("AI1")) # placeholder channel I/O
-        print(f"Temperature: {temperatureVoltage}") # debug
+        #temperatureVoltage = float(self.daq.query("AI1")) # channel 1
+        temperatureVoltage = float(self.voltmeter.query("?")) # channel 1
+        print(f"Temperature: {temperatureVoltage}")
         temperature = 0
         for i, coeff in enumerate(self.coefficients):
             temperature += coeff * (temperatureVoltage ** i)
