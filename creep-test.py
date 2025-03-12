@@ -250,17 +250,36 @@ class TestHandler:
             (self.test.name and self.test.material)
             and (freq > 0) and (gauge_length > 0)
         ):
-            self.rm = pyvisa.ResourceManager()
-            resources = self.rm.list_resources()
-            print(resources)
+            try:
+                self.rm = pyvisa.ResourceManager()
+            except Exception as e:
+                print(f"Error creating VISA Resource Manager: {e}")
+                return
+            
+            try:
+                resources = self.rm.list_resources()
+                print(resources)
+            except Exception as e:
+                print(f"Error listing available resources: {e}")
+                return
 
-            self.daq = self.rm.open_resource('GPIB0::9::INSTR')
-            print("DAQ open")
+            # Open DAQ
+            try:
+                self.daq = self.rm.open_resource('GPIB0::9::INSTR')
+                print("DAQ open")
+            except Exception as e:
+                print(f"Failed to open DAQ instrument: {e}")
+                return
 
-            self.voltmeter = self.rm.open_resource('GPIB0::8::INSTR')
-            print("Voltmeter open")
+            # Open Voltmeter
+            try:
+                self.voltmeter = self.rm.open_resource('GPIB0::8::INSTR')
+                print("Voltmeter open")
+            except Exception as e:
+                print(f"Failed to open voltmeter: {e}")
+                return
 
-            #check status signal, if close to 0 then print smth and return... OR turn on the current, ask prof how it should work
+            #check status signal
             status = float(self.daq.query("AI0")) # channel 0
             if (abs(status) <= 0.001):
                 self.test_controls.display("Please prepare machine for test.")
