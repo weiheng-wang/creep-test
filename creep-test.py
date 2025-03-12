@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import *
+from tkinter import simpledialog
+from tkinter import messagebox
 from tkinter.scrolledtext import ScrolledText
 from dataclasses import dataclass
 from typing import List
@@ -27,7 +29,7 @@ class Test:
         self.freq = tk.StringVar()
         self.freq_log = []
         self.notes = tk.StringVar()
-        self.gauge_length = tk.StringVar()
+        self.gauge_length = tk.StringVar(value="1.4")
         self.data_file_name = ""
         self.info_file_name = ""
         self.last_written_index = 0
@@ -56,13 +58,13 @@ class TestInfoEntry(tk.Frame):
         self.matr_ent.grid(row=1, column=1, sticky="ew")
 
         # row 2 ---------------------------------------------  
-        freq_lbl = tk.Label(self, text="Frequency:", anchor="e")
+        freq_lbl = tk.Label(self, text="Period (s):", anchor="e")
         freq_lbl.grid(row=2, column=0, sticky="ew")  
         self.freq_ent = tk.Entry(self, textvariable=self.handler.test.freq)
         self.freq_ent.grid(row=2, column=1, sticky="ew")    
 
         # row 3 ---------------------------------------------  
-        gauge_length_lbl = tk.Label(self, text="Gauge Length:", anchor="e")
+        gauge_length_lbl = tk.Label(self, text="Gauge Length (in):", anchor="e")
         gauge_length_lbl.grid(row=3, column=0, sticky="ew")  
         self.gauge_length_ent = tk.Entry(self, textvariable=self.handler.test.gauge_length)
         self.gauge_length_ent.grid(row=3, column=1, sticky="ew")
@@ -91,19 +93,19 @@ class StrainPlot(tk.Frame):
         )
 
         self.strainplt.set_xlabel("Time (s)")
-        self.strainplt.set_ylabel("Strain")
+        self.strainplt.set_ylabel("True Strain")
         self.strainplt.grid(color="darkgrey", alpha=0.65, linestyle='dashed')
         self.strainplt.set_facecolor("w")
         self.strainplt.margins(0, tight=True)
 
         self.strainrateplt.set_xlabel("Time (s)")
-        self.strainrateplt.set_ylabel("Strain Rate")
+        self.strainrateplt.set_ylabel("True Strain Rate")
         self.strainrateplt.grid(color="darkgrey", alpha=0.65, linestyle='dashed')
         self.strainrateplt.set_facecolor("w")
         self.strainrateplt.margins(0, tight=True)
 
         self.temperatureplt.set_xlabel("Time (s)")
-        self.temperatureplt.set_ylabel("Temperature")
+        self.temperatureplt.set_ylabel("Temperature (C)")
         self.temperatureplt.grid(color="darkgrey", alpha=0.65, linestyle='dashed')
         self.temperatureplt.set_facecolor("w")
         self.temperatureplt.margins(0, tight=True)
@@ -132,13 +134,13 @@ class StrainPlot(tk.Frame):
 
             # Set X-axis limits using first and last elements (efficient for ordered data)
             x_min = 0
-            x_max = self.handler.elapsedMin[self.handler.idx - 1]
+            x_max = self.handler.elapsed[self.handler.idx - 1]
             self.strainplt.set_xlim(x_min, x_max)  # Shared x-axis
 
             # Update plot data
-            self.line1.set_data(self.handler.elapsedMin, self.handler.strain)
-            self.line2.set_data(self.handler.elapsedMin, self.handler.strainRate)
-            self.line3.set_data(self.handler.elapsedMin, self.handler.temperature)
+            self.line1.set_data(self.handler.elapsed, self.handler.trueStrain)
+            self.line2.set_data(self.handler.elapsed, self.handler.strainRate)
+            self.line3.set_data(self.handler.elapsed, self.handler.temperature)
 
             # Auto-scale Y axes
             def get_ylim(arr):
@@ -152,7 +154,7 @@ class StrainPlot(tk.Frame):
 
                 return (arr_min, arr_max)
             
-            self.strainplt.set_ylim(*get_ylim(self.handler.strain))
+            self.strainplt.set_ylim(*get_ylim(self.handler.trueStrain))
             self.strainrateplt.set_ylim(*get_ylim(self.handler.strainRate))
             self.temperatureplt.set_ylim(*get_ylim(self.handler.temperature))
 
@@ -254,7 +256,6 @@ class TestHandler:
 
             self.daq = self.rm.open_resource('GPIB0::9::INSTR')
             print("DAQ open")
-            self.daq.timeout = 5000
 
             self.voltmeter = self.rm.open_resource('GPIB0::8::INSTR')
             print("Voltmeter open")
@@ -286,12 +287,14 @@ class TestHandler:
             
             # Initialize arrays with NaN (to distinguish empty slots)
             self.timestamps = np.full(initial_capacity, np.nan, dtype=np.float64)
-            self.elapsedMin = np.full(initial_capacity, np.nan, dtype=np.float32)
+            self.elapsed = np.full(initial_capacity, np.nan, dtype=np.float32)
+            self.displacement = np.full(initial_capacity, np.nan, dtype=np.float32)
             self.strain = np.full(initial_capacity, np.nan, dtype=np.float32)
+            self.trueStrain = np.full(initial_capacity, np.nan, dtype=np.float32)
             self.strainRate = np.full(initial_capacity, np.nan, dtype=np.float32)
             self.temperature = np.full(initial_capacity, np.nan, dtype=np.float32)
 
-            self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": 0})
+            self.test.freq_log.append({"Period (s)": self.test.freq, "Timestamp (s)": 0})
 
             self.test.data_file_name = f"{self.test.name}_data.csv"
             self.test.info_file_name = f"{self.test.name}_info.csv"
@@ -346,8 +349,10 @@ class TestHandler:
             return new_arr
         
         self.timestamps = resize(self.timestamps)
-        self.elapsedMin = resize(self.elapsedMin)
+        self.elapsed = resize(self.elapsed)
+        self.displacement = resize(self.displacement)
         self.strain = resize(self.strain)
+        self.trueStrain = resize(self.trueStrain)
         self.strainRate = resize(self.strainRate)
         self.temperature = resize(self.temperature)
         self.capacity = new_capacity
@@ -355,19 +360,22 @@ class TestHandler:
     def take_readings(self):
         while self.is_running and not self.request_stop:
             current_time = time.time()
-            if current_time - self.last_read_time >= 1/(float(self.test.freq)): # Data acquisition period
+            if current_time - self.last_read_time >= float(self.test.freq): # Data acquisition period
                 if self.idx >= self.capacity:
                     self._resize_arrays(2 * self.capacity)
                     print("Doubled size of arrays")
                 
+                # Take the readings
                 self.timestamps[self.idx] = current_time
-                self.elapsedMin[self.idx] = self.get_time(current_time)
-                self.strain[self.idx] = self.get_strain()
+                self.elapsed[self.idx] = self.get_time(current_time)
+                self.displacement[self.idx] = self.get_displacement()
+                self.strain[self.idx] = self.get_strain(self.displacement[self.idx])
+                self.trueStrain[self.idx] = self.get_true_strain(self.strain[self.idx])
                 if self.idx < 1:
                     self.strainRate[self.idx] = 0
                 else:
-                    strainDiff = self.strain[self.idx] - self.strain[self.idx - 1]
-                    timeDiff = current_time - self.elapsedMin[self.idx - 1]
+                    strainDiff = self.trueStrain[self.idx] - self.trueStrain[self.idx - 1]
+                    timeDiff = current_time - self.elapsed[self.idx - 1]
                     self.strainRate[self.idx] = self.get_strain_rate(strainDiff, timeDiff)
                 self.temperature[self.idx] = self.get_temperature()
                 self.idx += 1
@@ -382,8 +390,8 @@ class TestHandler:
                     self.stop_test()
                     return
 
-                # Print saved data to log
-                self.test_controls.display(f"Elapsed Time: {self.elapsedMin[self.idx - 1]:.2f}\nStrain: {self.strain[self.idx - 1]:.2f}\nStrain Rate: {self.strainRate[self.idx - 1]:.2f}\nTemperature: {self.temperature[self.idx - 1]:.2f}")
+                # Print saved data to log (only elapsed time, true strain, true strain rate, and temperature)
+                self.test_controls.display(f"Elapsed Time (s): {self.elapsed[self.idx - 1]:.2f}\nTrue Strain: {self.trueStrain[self.idx - 1]:.2f}\nTrue Strain Rate: {self.strainRate[self.idx - 1]:.2f}\nTemperature (C): {self.temperature[self.idx - 1]:.2f}")
                 self.test_controls.display("="*44)
 
                 # Save data to csv file
@@ -400,8 +408,8 @@ class TestHandler:
                 if freq != float(self.test.freq):
                     if (freq > 0):
                         self.test.freq = freq
-                        self.test.freq_log.append({"Frequency": self.test.freq, "Timestamp": self.elapsedMin[self.idx - 1]})
-                        self.test_controls.display(f"Frequency changed to {self.test.freq}.")
+                        self.test.freq_log.append({"Period (s)": self.test.freq, "Timestamp (s)": self.elapsed[self.idx - 1]})
+                        self.test_controls.display(f"Period changed to {self.test.freq}s.")
                     else:
                         self.test_controls.display("Please enter valid input.")
 
@@ -414,13 +422,15 @@ class TestHandler:
         if start_idx < current_idx:
             # Extract new data slices directly from numpy arrays
             new_timestamps = self.timestamps[start_idx:current_idx]
-            new_elapsed = self.elapsedMin[start_idx:current_idx]
+            new_elapsed = self.elapsed[start_idx:current_idx]
+            new_displacement = self.displacement[start_idx:current_idx]
             new_strain = self.strain[start_idx:current_idx]
+            new_true_strain = self.trueStrain[start_idx:current_idx]
             new_strain_rate = self.strainRate[start_idx:current_idx]
             new_temp = self.temperature[start_idx:current_idx]
 
-            fieldnames = ['Epoch Time', 'Elapsed Time (min)', 'Strain', 
-                        'Strain Rate', 'Temperature']
+            fieldnames = ['Epoch Time (s)', 'Elapsed Time (s)', 'Displacement (in)', 'Engineering Strain', 'True Strain', 
+                        'Strain Rate (1/s)', 'Temperature (C)']
             
             with open(self.test.data_file_name, mode='a', newline='') as file:
                 writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -432,11 +442,13 @@ class TestHandler:
                 # Write all new entries
                 for i in range(len(new_elapsed)):
                     writer.writerow({
-                        'Epoch Time': new_timestamps[i],  
-                        'Elapsed Time (min)': new_elapsed[i],
-                        'Strain': new_strain[i],
-                        'Strain Rate': new_strain_rate[i],
-                        'Temperature': new_temp[i]
+                        'Epoch Time (s)': new_timestamps[i],  
+                        'Elapsed Time (s)': new_elapsed[i],
+                        'Displacement (in)': new_displacement[i],
+                        'Engineering Strain': new_strain[i],
+                        'True Strain': new_true_strain[i],
+                        'Strain Rate (1/s)': new_strain_rate[i],
+                        'Temperature (C)': new_temp[i]
                     })
             self.test.last_written_index = current_idx
 
@@ -445,10 +457,10 @@ class TestHandler:
             file.write("="*50 + "\n")
             file.write(f"Name: {self.test.name}\n")
             file.write(f"Material: {self.test.material}\n")
-            file.write(f"Gauge Length: {self.test.gauge_length}\n")
+            file.write(f"Gauge Length (in): {self.test.gauge_length}\n")
             file.write(f"Notes: {self.test.notes}\n")
             for entry in self.test.freq_log:
-                file.write(f"Frequency Log: {entry['Frequency']} at {entry['Timestamp']}\n")
+                file.write(f"Period Log: {entry['Period (s)']} at {entry['Timestamp (s)']}\n")
             file.write("="*50 + "\n")
 
     # NIST Type K Thermocouple coefficients for 0°C to 1372°C
@@ -468,21 +480,28 @@ class TestHandler:
     def get_time(self, time):
         return time - self.start_time
 
-    def get_strain(self):
-        strainVoltage = float(self.daq.query("AI2")) # channel 2
-        print(f"Strain: {strainVoltage}")
-        displacement = (0.04897 * strainVoltage) + 0.53505
+    def get_displacement(self):
+        displacementVoltage = float(self.daq.query("AI2")) # channel 2
+        print(f"Displacement Voltage: {displacementVoltage}")
+        displacement = (0.04897 * displacementVoltage) + 0.53505
+        return displacement
+
+    def get_strain(self, displacement):
         strain = displacement / float(self.test.gauge_length)
         return strain
+    
+    def get_true_strain(self, strain):
+        true_strain = np.log(1 + strain)
+        return true_strain
     
     def get_strain_rate(self, strainDiff, timeDiff):
         strain_rate = strainDiff / timeDiff
         return strain_rate
 
     def get_temperature(self):
-        #temperatureVoltage = float(self.daq.query("AI1")) # channel 1
-        temperatureVoltage = float(self.voltmeter.query("?")) # channel 1
-        print(f"Temperature: {temperatureVoltage}")
+        #temperatureVoltage = 1000 * float(self.daq.query("AI1")) # channel 1
+        temperatureVoltage = 1000 * float(self.voltmeter.query("?")) # channel 1
+        print(f"Temperature Voltage: {temperatureVoltage}")
         temperature = 0
         for i, coeff in enumerate(self.coefficients):
             temperature += coeff * (temperatureVoltage ** i)
@@ -551,6 +570,50 @@ def main():
     root.title("Creep Test")
     strainApp.ROOT = root
     root.geometry("1000x650") # window size
+    root.withdraw() # temporarily hide window
+
+    def get_load():
+        while True:
+            appliedLoad = simpledialog.askstring("Applied Load (g)", "Enter applied load (g):")
+            if not appliedLoad:
+                messagebox.showwarning("Invalid Input", "Please enter a valid value for the applied load.")
+                continue
+            try:
+                appliedLoad = float(appliedLoad)
+                return appliedLoad
+            except ValueError:
+                messagebox.showwarning("Invalid Input", "Please enter a valid value for the applied load.")
+                continue
+
+    def get_area():
+        while True:
+            area = simpledialog.askstring("Cross Sectional Area (m^2)", "Enter cross sectional area (m^2):")
+            if not area:
+                messagebox.showwarning("Invalid Input", "Please enter a valid value for the cross sectional area.")
+                continue
+            try:
+                area = float(area)
+                return area
+            except ValueError:
+                messagebox.showwarning("Invalid Input", "Please enter a valid value for the cross sectional area.")
+                continue
+
+    while True:
+        appliedLoad = get_load()
+        area = get_area()
+
+        intendedLoad = (appliedLoad + 274) / 1000 * 3 # pre-load: 274 g, convert to kg, 3:1 load
+        intendedForce = intendedLoad * 9.80665 # F = mg
+        intendedStress = (intendedForce / area) / (10 ** 6) # P = F/A, convert to MPa
+
+        response = messagebox.askquestion("Confirmation of Intended Stress", f"Verify intended stress of {intendedStress:.2f} MPa.")
+
+        if response == "no":
+            continue  # Continue loop to ask input again
+        else:
+            break
+
+    root.deiconify() # unhide window
     strainApp(root).grid(sticky="nsew")
     root.mainloop()
 
