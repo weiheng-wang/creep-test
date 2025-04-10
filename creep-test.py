@@ -229,7 +229,6 @@ class TestHandler:
         self.last_read_time = time.time()
 
         self.firstStrain = 0
-        self.firstTrueStrain = 0
         
     def start_test(self):
         # Read the text entries (except notes)
@@ -327,9 +326,6 @@ class TestHandler:
             displacement = (0.04897 * displacementVoltage) + 0.53505
             strain = displacement / float(self.test.gauge_length)
             self.firstStrain = strain
-
-            true_strain = np.log(1 + strain)    
-            self.firstTrueStrain = true_strain
 
             self.test_controls.display("Test started.")
             print("Started the test.")
@@ -523,7 +519,7 @@ class TestHandler:
         return strain
     
     def get_true_strain(self, strain):
-        true_strain = np.log(1 + strain) - self.firstTrueStrain
+        true_strain = np.log(1 + strain)
         return true_strain
     
     def get_strain_rate(self, strainDiff, timeDiff):
