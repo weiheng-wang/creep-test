@@ -234,6 +234,7 @@ class TestHandler:
         self.ani = None
         self.last_save_time = time.time()
         self.last_read_time = time.time()
+        self.last_check_time = time.time()
 
         self.firstStrain = 0
         self.testStarted = False
@@ -440,23 +441,15 @@ class TestHandler:
 
                 self.last_read_time = current_time
 
-            if current_time - self.last_save_time >= 5:  # Update files and frequency (if there is a change) period
                 #if status voltage close to 0 then stop
                 status = float(self.daq.query("AI0")) # channel 0
                 if (abs(status) <= 0.001):
                     self.test_controls.display("Test over")
+                    self.save_to_csv() # update file up to end of test
                     self.stop_test()
                     return
 
-                # Print saved data to log (only elapsed time, true strain, true strain rate, and temperature)
-                self.test_controls.display(f"Elapsed Time (s): {self.elapsed[self.idx - 1]:.2f}\nTrue Strain: {self.trueStrain[self.idx - 1]:.2f}\nTrue Strain Rate: {self.strainRate[self.idx - 1]:.2f}\nTemperature (C): {self.temperature[self.idx - 1]:.2f}")
-                self.test_controls.display("="*44)
-
-                # Save data to csv file
-                self.save_to_csv()
-                # Update last save time
-                self.last_save_time = current_time
-
+            if current_time - self.last_check_time >= 3: # Update frequency/period if there is a change
                 temp = self.test_info_entry.freq_ent.get()
                 # Try to convert frequency into float
                 try:
@@ -470,6 +463,17 @@ class TestHandler:
                         self.test_controls.display(f"Period changed to {self.test.freq}s.")
                     else:
                         self.test_controls.display("Please enter valid input.")
+                self.last_check_time = current_time
+
+            if current_time - self.last_save_time >= max(5, self.test.freq):  # Update files
+                # Print saved data to log (only elapsed time, true strain, true strain rate, and temperature)
+                self.test_controls.display(f"Elapsed Time (s): {self.elapsed[self.idx - 1]:.2f}\nTrue Strain: {self.trueStrain[self.idx - 1]:.2f}\nTrue Strain Rate: {self.strainRate[self.idx - 1]:.2f}\nTemperature (C): {self.temperature[self.idx - 1]:.2f}")
+                self.test_controls.display("="*44)
+
+                # Save data to csv file
+                self.save_to_csv()
+                # Update last save time
+                self.last_save_time = current_time
 
     def save_to_csv(self):
         # Get current data index and last saved index
@@ -521,18 +525,31 @@ class TestHandler:
                 file.write(f"Period Log: {entry['Period (s)']} at {entry['Timestamp (s)']}\n")
             file.write("="*50 + "\n")
 
-    # NIST Type K Thermocouple coefficients for 0°C to 1372°C
-    coefficients = [
-        0.0000000e+00,
-        2.508355e+01,
-        7.860106e-02,
-        -2.503131e-01,
-        8.315270e-02,
-        -1.228034e-02,
-        9.804036e-04,
-        -4.413030e-05,
-        1.057734e-06,
-        -1.052755e-08
+    # ITS‑90 coefficients for negative voltage (-200°C to 0°C)
+    NEGATIVE_COEFFICIENTS = [
+        0.000000e+00,   # c0
+        2.5173462e+01,  # c1
+        -1.1662878e+00, # c2
+        -1.0833638e+00, # c3
+        -8.9773540e-01, # c4
+        -3.7342377e-01, # c5
+        -8.6632643e-02, # c6
+        -1.0450598e-02, # c7
+        -5.1920577e-04  # c8
+    ]
+
+    # ITS‑90 coefficients for positive voltage (0°C to 1250°C)
+    POSITIVE_COEFFICIENTS = [
+        0.0000000e+00,   # c0
+        2.508355e+01,    # c1
+        7.860106e-02,    # c2
+        -2.503131e-01,   # c3
+        8.315270e-02,    # c4
+        -1.228034e-02,   # c5
+        9.804036e-04,    # c6
+        -4.413030e-05,   # c7
+        1.057734e-06,    # c8
+        -1.052755e-08    # c9
     ]
 
     def get_time(self, time):
@@ -559,9 +576,14 @@ class TestHandler:
     def get_temperature(self):
         #temperatureVoltage = 1000 * float(self.daq.query("AI1")) # channel 1
         temperatureVoltage = 1000 * float(self.voltmeter.query("?")) # channel 1
+        if temperatureVoltage < 0:
+            coeffs = self.NEGATIVE_COEFFICIENTS
+        else:
+            coeffs = self.POSITIVE_COEFFICIENTS
+
         print(f"Temperature Voltage: {temperatureVoltage}")
-        temperature = 0
-        for i, coeff in enumerate(self.coefficients):
+        temperature = 0.0
+        for i, coeff in enumerate(coeffs):
             temperature += coeff * (temperatureVoltage ** i)
         return temperature
 
