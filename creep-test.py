@@ -172,7 +172,7 @@ class TestControls(tk.Frame):
 
         # row 0 col 0 --------------------------------------
         self.start_btn = tk.Button(self)
-        self.start_btn.configure(text="Start", state="normal", command=self.handler.start_test)
+        self.start_btn.configure(text="Start", state="disabled", command=self.handler.start_test)
         self.start_btn.grid(row=0, column=0, sticky="ew")
 
         # row 0 col 1 --------------------------------------
@@ -185,7 +185,7 @@ class TestControls(tk.Frame):
         self.pause_btn.configure(text="Pause", state="disabled", command=self.handler.toggle_pause)
         self.pause_btn.grid(row=0, column=2, sticky="ew")
 
-        # row 1 col 0 --------------------------------------
+        # row 5 col 0 --------------------------------------
         self.log_text = ScrolledText(
             self, background="white", height=25, width=44, state="disabled"
         )
@@ -199,6 +199,13 @@ class TestControls(tk.Frame):
         self.text_box.tag_bind("hyperlink", "<Button-1>",lambda e: webbrowser.open("https://docs.google.com/document/d/1zfNkIwj9hVPKOLqsJrkodcGsiBNH8iFY/edit?usp=sharing&ouid=107579670681160493805&rtpof=true&sd=true"))
         self.text_box.config(state="disabled")
         self.text_box.grid(row=5, column=0, sticky="ew")
+
+        # row 5 col 1 --------------------------------------
+        self.connect_btn = tk.Button(self)
+        self.connect_btn.configure(text="Connect I/O", state="normal", command=self.handler.connect_IO)
+        self.connect_btn.grid(row=5, column=2, sticky="ew")
+
+        
 
     def display(self, msg: str):
         self.log_text.configure(state="normal")
@@ -229,6 +236,7 @@ class TestHandler:
         self.last_read_time = time.time()
 
         self.firstStrain = 0
+        self.testStarted = False
         
     def start_test(self):
         # Read the text entries (except notes)
@@ -252,42 +260,16 @@ class TestHandler:
             (self.test.name and self.test.material)
             and (freq > 0) and (gauge_length > 0)
         ):
-            try:
-                self.rm = pyvisa.ResourceManager()
-            except Exception as e:
-                print(f"Error creating VISA Resource Manager: {e}")
-                return
-            
-            try:
-                resources = self.rm.list_resources()
-                print(resources)
-            except Exception as e:
-                print(f"Error listing available resources: {e}")
-                return
-
-            # Open DAQ
-            try:
-                self.daq = self.rm.open_resource('GPIB0::9::INSTR')
-                print("DAQ open")
-            except Exception as e:
-                print(f"Failed to open DAQ instrument: {e}")
-                return
-
-            # Open Voltmeter
-            try:
-                self.voltmeter = self.rm.open_resource('GPIB0::8::INSTR')
-                print("Voltmeter open")
-            except Exception as e:
-                print(f"Failed to open voltmeter: {e}")
-                return
-
             #check status signal
+            #self.daq.write("VC3") # send 1 mA current output? FIXME
             status = float(self.daq.query("AI0")) # channel 0
+            print(status)
             if (abs(status) <= 0.001):
                 self.test_controls.display("Please prepare machine for test.")
                 return
             
-            self.start_time = time.time() 
+            self.start_time = time.time()
+            self.testStarted = True
             self.is_running = True
             self.paused = False
 
@@ -368,6 +350,54 @@ class TestHandler:
             self.test_controls.display("Test resumed.")
             self.test_controls.pause_btn.configure(text="Pause")
             self.ani.event_source.start()
+
+    def connect_IO(self):
+            try:
+                self.rm = pyvisa.ResourceManager()
+            except Exception as e:
+                print(f"Error creating VISA Resource Manager: {e}")
+                return
+            
+            try:
+                resources = self.rm.list_resources()
+                print(resources)
+            except Exception as e:
+                print(f"Error listing available resources: {e}")
+                return
+
+            # Open DAQ
+            try:
+                self.daq = self.rm.open_resource('GPIB0::9::INSTR')
+                print("DAQ open")
+            except Exception as e:
+                print(f"Failed to open DAQ instrument: {e}")
+                return
+
+            # Open Voltmeter
+            try:
+                self.voltmeter = self.rm.open_resource('GPIB0::8::INSTR')
+                print("Voltmeter open")
+            except Exception as e:
+                print(f"Failed to open voltmeter: {e}")
+                return
+            
+            self.test_controls.connect_btn.configure(state="disabled")
+            self.test_controls.start_btn.configure(state="normal")
+
+            self.pool.submit(self.wait_for_start)
+
+    def wait_for_start(self):
+        while not self.testStarted:
+            current_time = time.time()
+            if (current_time - self.last_read_time) >= 3:
+                status = float(self.daq.query("AI0")) # channel 0
+                print(status)
+                displacementVoltage = float(self.daq.query("AI2")) # channel 2
+                print(f"Displacement Voltage: {displacementVoltage}")
+                temperatureVoltage = 1000 * float(self.voltmeter.query("?")) # channel 1
+                print(f"Temperature Voltage: {temperatureVoltage}")
+                self.last_read_time = current_time
+        self.last_read_time = self.last_read_time - 100
 
     def _resize_arrays(self, new_capacity):
         """Double array size while preserving existing data (amortized O(1) time)."""
