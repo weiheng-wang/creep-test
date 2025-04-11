@@ -261,7 +261,7 @@ class TestHandler:
             and (freq > 0) and (gauge_length > 0)
         ):
             #check status signal
-            #self.daq.write("VC3") # send 1 mA current output? FIXME
+            self.daq.write("VC3") # send 1 mA current output
             status = float(self.daq.query("AI0")) # channel 0
             print(status)
             if (abs(status) <= 0.001):
@@ -619,6 +619,10 @@ class strainApp(tk.Frame):
         MainFrame(self).grid(sticky="nsew")
 
     def close(self) -> None:
+        '''self.handler.daq.close()
+        print("DAQ closed")
+        self.handler.voltmeter.close()
+        print("Voltmeter closed")'''
         self.quit()
 
 
