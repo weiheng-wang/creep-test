@@ -30,6 +30,7 @@ class Test:
         self.freq_log = []
         self.notes = tk.StringVar()
         self.gauge_length = tk.StringVar(value="1.4")
+        self.xmin = tk.StringVar(value="0")
         self.data_file_name = ""
         self.info_file_name = ""
         self.last_written_index = 0
@@ -47,31 +48,37 @@ class TestInfoEntry(tk.Frame):
 
         # row 0 ---------------------------------------------
         name_lbl = tk.Label(self, text="Name:", anchor="e")
-        name_lbl.grid(row=0, column=0, sticky="ew")       
+        name_lbl.grid(row=0, column=0, sticky="ew")
         self.name_ent = tk.Entry(self, textvariable=self.handler.test.name)
         self.name_ent.grid(row=0, column=1, sticky="ew")
         
         # row 1 ---------------------------------------------  
         matr_lbl = tk.Label(self, text="Material:", anchor="e")
-        matr_lbl.grid(row=1, column=0, sticky="ew")      
+        matr_lbl.grid(row=1, column=0, sticky="ew")
         self.matr_ent = tk.Entry(self, textvariable=self.handler.test.material)
         self.matr_ent.grid(row=1, column=1, sticky="ew")
 
+        xmin_lbl = tk.Label(self, text="x-min:", anchor="e")
+        xmin_lbl.grid(row=1, column=0, sticky="ew")
+        self.xmin_ent = tk.Entry(self, textvariable=self.handler.test.xmin)
+        self.xmin_ent.grid(row=1, column=3, sticky="ew") #FIXME idk if this will be in the right place
+        self.xmin_ent.config(state="disabled")
+
         # row 2 ---------------------------------------------  
         freq_lbl = tk.Label(self, text="Period (s):", anchor="e")
-        freq_lbl.grid(row=2, column=0, sticky="ew")  
+        freq_lbl.grid(row=2, column=0, sticky="ew")
         self.freq_ent = tk.Entry(self, textvariable=self.handler.test.freq)
-        self.freq_ent.grid(row=2, column=1, sticky="ew")    
+        self.freq_ent.grid(row=2, column=1, sticky="ew")
 
         # row 3 ---------------------------------------------  
         gauge_length_lbl = tk.Label(self, text="Gauge Length (in):", anchor="e")
-        gauge_length_lbl.grid(row=3, column=0, sticky="ew")  
+        gauge_length_lbl.grid(row=3, column=0, sticky="ew")
         self.gauge_length_ent = tk.Entry(self, textvariable=self.handler.test.gauge_length)
         self.gauge_length_ent.grid(row=3, column=1, sticky="ew")
 
         # row 4 ---------------------------------------------  
         notes_lbl = tk.Label(self, text="Notes:", anchor="e")
-        notes_lbl.grid(row=4, column=0, sticky="ew")  
+        notes_lbl.grid(row=4, column=0, sticky="ew")
         self.notes_ent = tk.Entry(self, textvariable=self.handler.test.notes)
         self.notes_ent.grid(row=4, column=1, sticky="ew")
 
@@ -114,9 +121,9 @@ class StrainPlot(tk.Frame):
         self.line2, = self.strainrateplt.plot([], [])
         self.line3, = self.temperatureplt.plot([], [])
 
-        self.strain_min = self.strain_max = None
+        '''self.strain_min = self.strain_max = None
         self.sr_min = self.sr_max = None
-        self.temp_min = self.temp_max = None
+        self.temp_min = self.temp_max = None'''
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         self.canvas.get_tk_widget().grid(sticky="nsew", pady=(40,0))
@@ -133,7 +140,7 @@ class StrainPlot(tk.Frame):
                 return
 
             # Set X-axis limits using first and last elements (efficient for ordered data)
-            x_min = 0
+            x_min = float(self.handler.test.xmin)
             x_max = self.handler.elapsed[self.handler.idx - 1]
             self.strainplt.set_xlim(x_min, x_max)  # Shared x-axis
 
@@ -143,17 +150,19 @@ class StrainPlot(tk.Frame):
             self.line3.set_data(self.handler.elapsed, self.handler.temperature)
 
             # Auto-scale Y axes
-            def get_ylim(arr):
+            def get_ylim(arr, padding=0.1):
                 if arr.size == 0 or np.isnan(arr).all():  # Handle empty or all-NaN arrays
-                    return (0, 0.1)  # Default y-axis range
+                    return (-0.1, 0.1)  # Default y-axis range
 
                 arr_min, arr_max = np.nanmin(arr), np.nanmax(arr)
 
                 if arr_min == arr_max:  # Prevent zero range
-                    return (arr_min, arr_max + 0.1)
+                    return (arr_min - 0.1, arr_max + 0.1)
 
-                return (arr_min, arr_max)
-            
+                data_range = arr_max - arr_min
+                pad = padding * data_range  # padding as a percentage of data range
+                return (arr_min - pad, arr_max + pad)
+                        
             self.strainplt.set_ylim(*get_ylim(self.handler.trueStrain))
             self.strainrateplt.set_ylim(*get_ylim(self.handler.strainRate))
             self.temperatureplt.set_ylim(*get_ylim(self.handler.temperature))
@@ -279,6 +288,9 @@ class TestHandler:
             self.test_info_entry.matr_ent.config(state="disabled")
             self.test_info_entry.gauge_length_ent.config(state="disabled")
 
+            # Enable editing of xmin
+            self.test_info_entry.xmin_ent.config(state="normal")
+
             # Disable the start button and enable the stop and pause buttons
             if self.test_controls:
                 self.test_controls.start_btn.configure(state="disabled")
@@ -323,19 +335,20 @@ class TestHandler:
 
     def stop_test(self):
         self.request_stop = True
-        self.test_controls.start_btn.configure(state="normal")
         self.test_controls.pause_btn.configure(state="disabled")
         self.test_controls.stop_btn.configure(state="disabled")
         self.ani.event_source.stop()
 
         print("Stopped the test.")
         self.test_controls.display("Test stopped.")
-        self.test_info_entry.notes_ent.config(state="disabled")
+        #self.test_info_entry.notes_ent.config(state="disabled")
 
         self.daq.close()
         print("DAQ closed")
         self.voltmeter.close()
         print("Voltmeter closed")
+
+        self.test_controls.connect_btn.configure(state="normal")
 
     def toggle_pause(self):
         """Toggle the pause/resume state."""
@@ -449,18 +462,32 @@ class TestHandler:
                     self.stop_test()
                     return
 
-            if current_time - self.last_check_time >= 3: # Update frequency/period if there is a change
+            if current_time - self.last_check_time >= 3: # Update frequency/period and xmin of plots if there is a change
                 temp = self.test_info_entry.freq_ent.get()
                 # Try to convert frequency into float
                 try:
                     freq = float(temp)
                 except ValueError:
                     freq = 0
+                    self.test_controls.display("Please enter valid input.")
                 if freq != float(self.test.freq):
                     if (freq > 0):
-                        self.test.freq = freq
-                        self.test.freq_log.append({"Period (s)": self.test.freq, "Timestamp (s)": self.elapsed[self.idx - 1]})
-                        self.test_controls.display(f"Period changed to {self.test.freq}s.")
+                        self.test.freq.set(freq)
+                        self.test.freq_log.append({"Period (s)": freq, "Timestamp (s)": self.elapsed[self.idx - 1]})
+                        self.test_controls.display(f"Period changed to {freq}s.")
+                    else:
+                        self.test_controls.display("Please enter valid input.")
+
+                temp = self.test_info_entry.xmin_ent.get()
+                # Try to convert xmin into float
+                try:
+                    xmin = float(temp)
+                except ValueError:
+                    xmin = -1
+                if xmin != float(self.test.xmin):
+                    if (xmin >= 0 and xmin < self.elapsed[self.idx - 1]):
+                        self.test.xmin.set(xmin)
+                        self.test_controls.display(f"x-min changed to {xmin}s.")
                     else:
                         self.test_controls.display("Please enter valid input.")
                 self.last_check_time = current_time
