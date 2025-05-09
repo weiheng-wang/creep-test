@@ -52,35 +52,36 @@ class TestInfoEntry(tk.Frame):
         self.name_ent = tk.Entry(self, textvariable=self.handler.test.name)
         self.name_ent.grid(row=0, column=1, sticky="ew")
         
-        # row 1 ---------------------------------------------  
+        # row 1 ---------------------------------------------
         matr_lbl = tk.Label(self, text="Material:", anchor="e")
         matr_lbl.grid(row=1, column=0, sticky="ew")
         self.matr_ent = tk.Entry(self, textvariable=self.handler.test.material)
         self.matr_ent.grid(row=1, column=1, sticky="ew")
 
-        xmin_lbl = tk.Label(self, text="x-min:", anchor="e")
-        xmin_lbl.grid(row=1, column=0, sticky="ew")
-        self.xmin_ent = tk.Entry(self, textvariable=self.handler.test.xmin)
-        self.xmin_ent.grid(row=1, column=3, sticky="ew") #FIXME idk if this will be in the right place
-        self.xmin_ent.config(state="disabled")
-
-        # row 2 ---------------------------------------------  
+        # row 2 ---------------------------------------------
         freq_lbl = tk.Label(self, text="Period (s):", anchor="e")
         freq_lbl.grid(row=2, column=0, sticky="ew")
         self.freq_ent = tk.Entry(self, textvariable=self.handler.test.freq)
         self.freq_ent.grid(row=2, column=1, sticky="ew")
 
-        # row 3 ---------------------------------------------  
+        # row 3 ---------------------------------------------
         gauge_length_lbl = tk.Label(self, text="Gauge Length (in):", anchor="e")
         gauge_length_lbl.grid(row=3, column=0, sticky="ew")
         self.gauge_length_ent = tk.Entry(self, textvariable=self.handler.test.gauge_length)
         self.gauge_length_ent.grid(row=3, column=1, sticky="ew")
 
-        # row 4 ---------------------------------------------  
+        # row 4 ---------------------------------------------
         notes_lbl = tk.Label(self, text="Notes:", anchor="e")
         notes_lbl.grid(row=4, column=0, sticky="ew")
         self.notes_ent = tk.Entry(self, textvariable=self.handler.test.notes)
         self.notes_ent.grid(row=4, column=1, sticky="ew")
+
+        # row 5 ---------------------------------------------
+        xmin_lbl = tk.Label(self, text="x-min:", anchor="e")
+        xmin_lbl.grid(row=5, column=0, sticky="ew")
+        self.xmin_ent = tk.Entry(self, textvariable=self.handler.test.xmin)
+        self.xmin_ent.grid(row=5, column=1, sticky="ew")
+        self.xmin_ent.config(state="disabled")
 
 
 class StrainPlot(tk.Frame):
@@ -120,10 +121,6 @@ class StrainPlot(tk.Frame):
         self.line1, = self.strainplt.plot([], [])
         self.line2, = self.strainrateplt.plot([], [])
         self.line3, = self.temperatureplt.plot([], [])
-
-        '''self.strain_min = self.strain_max = None
-        self.sr_min = self.sr_max = None
-        self.temp_min = self.temp_max = None'''
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         self.canvas.get_tk_widget().grid(sticky="nsew", pady=(40,0))
@@ -254,6 +251,7 @@ class TestHandler:
         self.test.material = self.test_info_entry.matr_ent.get()
         self.test.freq = self.test_info_entry.freq_ent.get()
         self.test.gauge_length = self.test_info_entry.gauge_length_ent.get()
+        self.test.xmin = self.test_info_entry.xmin_ent.get()
 
         # Try to convert frequency and gauge length into floats
         try:
@@ -341,14 +339,13 @@ class TestHandler:
 
         print("Stopped the test.")
         self.test_controls.display("Test stopped.")
-        #self.test_info_entry.notes_ent.config(state="disabled")
+        self.test_info_entry.notes_ent.config(state="disabled")
+        self.test_info_entry.gauge_length_ent(state="disabled")
 
         self.daq.close()
         print("DAQ closed")
         self.voltmeter.close()
         print("Voltmeter closed")
-
-        self.test_controls.connect_btn.configure(state="normal")
 
     def toggle_pause(self):
         """Toggle the pause/resume state."""
@@ -404,14 +401,18 @@ class TestHandler:
         while not self.testStarted:
             current_time = time.time()
             if (current_time - self.last_read_time) >= 3:
+
                 status = float(self.daq.query("AI0")) # channel 0
-                print(status)
+                print(f"Status Voltage: {status}")
+
                 displacementVoltage = float(self.daq.query("AI2")) # channel 2
                 print(f"Displacement Voltage: {displacementVoltage}")
+
                 temperatureVoltage = 1000 * float(self.voltmeter.query("?")) # channel 1
                 print(f"Temperature Voltage: {temperatureVoltage}")
+
                 self.last_read_time = current_time
-        self.last_read_time = self.last_read_time - 100
+        self.last_read_time = self.last_read_time - 1000 # to ensure a reading is taken once started
 
     def _resize_arrays(self, new_capacity):
         """Double array size while preserving existing data (amortized O(1) time)."""
@@ -454,45 +455,49 @@ class TestHandler:
 
                 self.last_read_time = current_time
 
-                #if status voltage close to 0 then stop
+            if current_time - self.last_check_time >= 3:
+                # CHECK FOR STATUS SIGNAL
                 status = float(self.daq.query("AI0")) # channel 0
                 if (abs(status) <= 0.001):
                     self.test_controls.display("Test over")
                     self.save_to_csv() # update file up to end of test
                     self.stop_test()
                     return
-
-            if current_time - self.last_check_time >= 3: # Update frequency/period and xmin of plots if there is a change
+                
+                # CHECK FOR FREQUENCY/PERIOD
                 temp = self.test_info_entry.freq_ent.get()
                 # Try to convert frequency into float
                 try:
                     freq = float(temp)
                 except ValueError:
                     freq = 0
-                    self.test_controls.display("Please enter valid input.")
+                    self.test_controls.display("Please enter valid period.")
                 if freq != float(self.test.freq):
                     if (freq > 0):
-                        self.test.freq.set(freq)
-                        self.test.freq_log.append({"Period (s)": freq, "Timestamp (s)": self.elapsed[self.idx - 1]})
-                        self.test_controls.display(f"Period changed to {freq}s.")
+                        self.test.freq = freq
+                        self.test.freq_log.append({"Period (s)": self.test.freq, "Timestamp (s)": self.elapsed[self.idx - 1]})
+                        self.test_controls.display(f"Period changed to {self.test.freq}s.")
                     else:
-                        self.test_controls.display("Please enter valid input.")
+                        self.test_controls.display("Please enter valid period.")
 
+                # CHECK FOR X-MIN
                 temp = self.test_info_entry.xmin_ent.get()
                 # Try to convert xmin into float
                 try:
                     xmin = float(temp)
                 except ValueError:
                     xmin = -1
+                    self.test_controls.display("Please enter valid x-min.")
                 if xmin != float(self.test.xmin):
                     if (xmin >= 0 and xmin < self.elapsed[self.idx - 1]):
-                        self.test.xmin.set(xmin)
+                        self.test.xmin = temp
                         self.test_controls.display(f"x-min changed to {xmin}s.")
                     else:
-                        self.test_controls.display("Please enter valid input.")
+                        self.test_controls.display("Please enter valid x-min.")
+
                 self.last_check_time = current_time
 
-            if current_time - self.last_save_time >= max(5, self.test.freq):  # Update files
+            if current_time - self.last_save_time >= max(5, float(self.test.freq)):
                 # Print saved data to log (only elapsed time, true strain, true strain rate, and temperature)
                 self.test_controls.display(f"Elapsed Time (s): {self.elapsed[self.idx - 1]:.2f}\nTrue Strain: {self.trueStrain[self.idx - 1]:.2f}\nTrue Strain Rate: {self.strainRate[self.idx - 1]:.2f}\nTemperature (C): {self.temperature[self.idx - 1]:.2f}")
                 self.test_controls.display("="*44)
@@ -603,12 +608,13 @@ class TestHandler:
     def get_temperature(self):
         #temperatureVoltage = 1000 * float(self.daq.query("AI1")) # channel 1
         temperatureVoltage = 1000 * float(self.voltmeter.query("?")) # channel 1
+        print(f"Temperature Voltage: {temperatureVoltage}")
+        
         if temperatureVoltage < 0:
             coeffs = self.NEGATIVE_COEFFICIENTS
         else:
             coeffs = self.POSITIVE_COEFFICIENTS
 
-        print(f"Temperature Voltage: {temperatureVoltage}")
         temperature = 0.0
         for i, coeff in enumerate(coeffs):
             temperature += coeff * (temperatureVoltage ** i)
