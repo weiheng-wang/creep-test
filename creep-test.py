@@ -557,7 +557,7 @@ class TestHandler:
                 file.write(f"Period Log: {entry['Period (s)']} at {entry['Timestamp (s)']}\n")
             file.write("="*50 + "\n")
 
-    # ITS‑90 coefficients for negative voltage (-200°C to 0°C)
+    # -200°C to 0°C
     NEGATIVE_COEFFICIENTS = [
         0.000000e+00,   # c0
         2.5173462e+01,  # c1
@@ -570,7 +570,7 @@ class TestHandler:
         -5.1920577e-04  # c8
     ]
 
-    # ITS‑90 coefficients for positive voltage (0°C to 1250°C)
+    # 0°C to 500°C
     POSITIVE_COEFFICIENTS = [
         0.0000000e+00,   # c0
         2.508355e+01,    # c1
@@ -582,6 +582,17 @@ class TestHandler:
         -4.413030e-05,   # c7
         1.057734e-06,    # c8
         -1.052755e-08    # c9
+    ]
+
+    # 500°C to 1372°C
+    HIGH_COEFFICIENTS = [
+    -1.318058e+02,  # c0
+     4.830222e+01,  # c1
+    -1.646031e+00,  # c2
+     5.464731e-02,  # c3
+    -9.650715e-04,  # c4
+     8.802193e-06,  # c5
+    -3.110810e-08   # c6
     ]
 
     def get_time(self, time):
@@ -610,10 +621,15 @@ class TestHandler:
         temperatureVoltage = 1000 * float(self.voltmeter.query("?")) # channel 1
         print(f"Temperature Voltage: {temperatureVoltage}")
         
-        if temperatureVoltage < 0:
+        if temperatureVoltage < 0.0:
             coeffs = self.NEGATIVE_COEFFICIENTS
-        else:
+        elif 0.0 <= temperatureVoltage <= 20.644:
             coeffs = self.POSITIVE_COEFFICIENTS
+        else:
+            coeffs = self.HIGH_COEFFICIENTS
+        
+        if temperatureVoltage > 54.886 or temperatureVoltage < -5.891:
+            print("WARNING: Temperature voltage out of range")
 
         temperature = 0.0
         for i, coeff in enumerate(coeffs):
