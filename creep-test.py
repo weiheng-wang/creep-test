@@ -31,6 +31,7 @@ class Test:
         self.notes = tk.StringVar()
         self.gauge_length = tk.StringVar(value="1.4")
         self.xmin = tk.StringVar(value="0")
+        self.bin_val = tk.StringVar(value="1")
         self.data_file_name = ""
         self.info_file_name = ""
         self.last_written_index = 0
@@ -82,6 +83,13 @@ class TestInfoEntry(tk.Frame):
         self.xmin_ent = tk.Entry(self, textvariable=self.handler.test.xmin)
         self.xmin_ent.grid(row=5, column=1, sticky="ew")
         self.xmin_ent.config(state="disabled")
+
+        # row 6 ---------------------------------------------
+        bin_lbl = tk.Label(self, text="Bin Size:", anchor="e")
+        bin_lbl.grid(row=6, column=0, sticky="ew")
+        self.bin_ent = tk.Entry(self, textvariable=self.handler.test.bin_val)
+        self.bin_ent.grid(row=6, column=1, sticky="ew")
+        self.bin_ent.config(state="disabled")
 
 
 class StrainPlot(tk.Frame):
@@ -136,33 +144,67 @@ class StrainPlot(tk.Frame):
             if self.handler.idx == 0:
                 return
 
+
+
+            # Number of points collected so far
+            n = self.handler.idx
+
+            # Slice into existing arrays (views, no copies)
+            x_full    = self.handler.elapsed[:n]
+            ts_full   = self.handler.trueStrain[:n]
+            sr_full   = self.handler.strainRate[:n]
+            temp_full = self.handler.temperature[:n]
+
+            def bin_mean(arr, bin_size):
+                length = arr.size
+                # No binning if bin_size <=1 or too few points
+                if bin_size <= 1 or length <= 1:
+                    return arr
+                m = length // bin_size
+                # Full bins: reshape view and mean over axis=1
+                full = arr[:m * bin_size].reshape(m, bin_size).mean(axis=1)
+                # Handle leftover partial bin
+                rem = length - m * bin_size
+                if rem:
+                    tail = np.array([arr[m * bin_size :].mean()])
+                    return np.concatenate((full, tail))
+                return full
+
+            # Choose raw vs binned data
+            bin_val = int(self.handler.test.bin_val)
+            if bin_val >= 1 and bin_val < n:
+                x   = bin_mean(x_full,    bin_val)
+                ts  = bin_mean(ts_full,   bin_val)
+                sr  = bin_mean(sr_full,   bin_val)
+                temp= bin_mean(temp_full, bin_val)
+            else:
+                x, ts, sr, temp = x_full, ts_full, sr_full, temp_full
+
+
             # Set X-axis limits using first and last elements (efficient for ordered data)
             x_min = float(self.handler.test.xmin)
             x_max = self.handler.elapsed[self.handler.idx - 1]
             self.strainplt.set_xlim(x_min, x_max)  # Shared x-axis
 
-            # Update plot data
-            self.line1.set_data(self.handler.elapsed, self.handler.trueStrain)
-            self.line2.set_data(self.handler.elapsed, self.handler.strainRate)
-            self.line3.set_data(self.handler.elapsed, self.handler.temperature)
+            # Update each line’s data
+            self.line1.set_data(x, ts)
+            self.line2.set_data(x, sr)
+            self.line3.set_data(x, temp)
 
             # Auto-scale Y axes
             def get_ylim(arr, padding=0.1):
                 if arr.size == 0 or np.isnan(arr).all():  # Handle empty or all-NaN arrays
                     return (-0.1, 0.1)  # Default y-axis range
-
                 arr_min, arr_max = np.nanmin(arr), np.nanmax(arr)
-
                 if arr_min == arr_max:  # Prevent zero range
                     return (arr_min - 0.1, arr_max + 0.1)
-
                 data_range = arr_max - arr_min
                 pad = padding * data_range  # padding as a percentage of data range
                 return (arr_min - pad, arr_max + pad)
-                        
-            self.strainplt.set_ylim(*get_ylim(self.handler.trueStrain))
-            self.strainrateplt.set_ylim(*get_ylim(self.handler.strainRate))
-            self.temperatureplt.set_ylim(*get_ylim(self.handler.temperature))
+    
+            self.strainplt.set_ylim(*get_ylim(ts))
+            self.strainrateplt.set_ylim(*get_ylim(sr))
+            self.temperatureplt.set_ylim(*get_ylim(temp))
 
 
 class TestControls(tk.Frame):
@@ -193,7 +235,7 @@ class TestControls(tk.Frame):
 
         # row 5 col 0 --------------------------------------
         self.log_text = ScrolledText(
-            self, background="white", height=25, width=44, state="disabled"
+            self, background="white", height=24, width=44, state="disabled"
         )
         self.log_text.grid(row=1, column=0, columnspan=3, sticky="ew")
         self.display("Welcome!")
@@ -252,6 +294,7 @@ class TestHandler:
         self.test.freq = self.test_info_entry.freq_ent.get()
         self.test.gauge_length = self.test_info_entry.gauge_length_ent.get()
         self.test.xmin = self.test_info_entry.xmin_ent.get()
+        self.test.bin_val = self.test_info_entry.bin_ent.get()
 
         # Try to convert frequency and gauge length into floats
         try:
@@ -286,8 +329,9 @@ class TestHandler:
             self.test_info_entry.matr_ent.config(state="disabled")
             self.test_info_entry.gauge_length_ent.config(state="disabled")
 
-            # Enable editing of xmin
+            # Enable editing of xmin and bin value
             self.test_info_entry.xmin_ent.config(state="normal")
+            self.test_info_entry.bin_ent.config(state="normal")
 
             # Disable the start button and enable the stop and pause buttons
             if self.test_controls:
@@ -339,8 +383,11 @@ class TestHandler:
 
         print("Stopped the test.")
         self.test_controls.display("Test stopped.")
+        self.test_info_entry.freq_ent.config(state="disabled")
+        self.test_info_entry.gauge_length_ent.config(state="disabled")
         self.test_info_entry.notes_ent.config(state="disabled")
-        self.test_info_entry.gauge_length_ent(state="disabled")
+        self.test_info_entry.xmin_ent.config(state="disabled")
+        self.test_info_entry.bin_ent.config(state="disabled")
 
         self.daq.close()
         print("DAQ closed")
@@ -469,31 +516,43 @@ class TestHandler:
                 # Try to convert frequency into float
                 try:
                     freq = float(temp)
+                    if freq != float(self.test.freq):
+                        if (freq > 0):
+                            self.test.freq = freq
+                            self.test.freq_log.append({"Period (s)": self.test.freq, "Timestamp (s)": self.elapsed[self.idx - 1]})
+                            self.test_controls.display(f"Period changed to {self.test.freq}s.")
+                        else:
+                            self.test_controls.display("Period must be a positive number.")
                 except ValueError:
-                    freq = 0
                     self.test_controls.display("Please enter valid period.")
-                if freq != float(self.test.freq):
-                    if (freq > 0):
-                        self.test.freq = freq
-                        self.test.freq_log.append({"Period (s)": self.test.freq, "Timestamp (s)": self.elapsed[self.idx - 1]})
-                        self.test_controls.display(f"Period changed to {self.test.freq}s.")
-                    else:
-                        self.test_controls.display("Please enter valid period.")
 
                 # CHECK FOR X-MIN
                 temp = self.test_info_entry.xmin_ent.get()
                 # Try to convert xmin into float
                 try:
                     xmin = float(temp)
+                    if xmin != float(self.test.xmin):
+                        if (xmin >= 0 and xmin < self.elapsed[self.idx - 1]):
+                            self.test.xmin = temp
+                            self.test_controls.display(f"x-min changed to {xmin}s.")
+                        else:
+                            self.test_controls.display("x-min out of range.")
                 except ValueError:
-                    xmin = -1
                     self.test_controls.display("Please enter valid x-min.")
-                if xmin != float(self.test.xmin):
-                    if (xmin >= 0 and xmin < self.elapsed[self.idx - 1]):
-                        self.test.xmin = temp
-                        self.test_controls.display(f"x-min changed to {xmin}s.")
-                    else:
-                        self.test_controls.display("Please enter valid x-min.")
+
+                # CHECK FOR BIN_VAL
+                temp = self.test_info_entry.bin_ent.get()
+                # Try to convert bin value into int
+                try:
+                    bin_val = int(temp)
+                    if bin_val != int(self.test.bin_val):
+                        if (bin_val >= 1 and bin_val < self.idx):
+                            self.test.bin_val = temp
+                            self.test_controls.display(f"Bin Value changed to {bin_val}.")
+                        else:
+                            self.test_controls.display("Bin Value out of range.")
+                except ValueError:
+                    self.test_controls.display("Please enter valid Bin Value.")
 
                 self.last_check_time = current_time
 
@@ -713,6 +772,9 @@ def main():
                 continue
             try:
                 appliedLoad = float(appliedLoad)
+                if appliedLoad <= 0:
+                    messagebox.showwarning("Invalid Input", "Applied load must be greater than 0.")
+                    continue
                 return appliedLoad
             except ValueError:
                 messagebox.showwarning("Invalid Input", "Please enter a valid value for the applied load.")
@@ -726,6 +788,9 @@ def main():
                 continue
             try:
                 area = float(area)
+                if area <= 0:
+                    messagebox.showwarning("Invalid Input", "Cross sectional area must be greater than 0.")
+                    continue
                 return area
             except ValueError:
                 messagebox.showwarning("Invalid Input", "Please enter a valid value for the cross sectional area.")
