@@ -235,7 +235,7 @@ class TestControls(tk.Frame):
 
         # row 5 col 0 --------------------------------------
         self.log_text = ScrolledText(
-            self, background="white", height=24, width=44, state="disabled"
+            self, background="white", height=25, width=44, state="disabled"
         )
         self.log_text.grid(row=1, column=0, columnspan=3, sticky="ew")
         self.display("Welcome!")
