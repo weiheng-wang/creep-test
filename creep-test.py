@@ -494,9 +494,18 @@ class TestHandler:
                 if self.idx < 1:
                     self.strainRate[self.idx] = 0
                 else:
-                    strainDiff = self.trueStrain[self.idx] - self.trueStrain[self.idx - 1]
-                    timeDiff = current_time - self.elapsed[self.idx - 1]
-                    self.strainRate[self.idx] = self.get_strain_rate(strainDiff, timeDiff)
+                    # Calculate the window of data points to use
+                    start_idx = max(0, self.idx - 9)
+                    t_window = self.elapsed[start_idx:self.idx + 1]
+                    s_window = self.trueStrain[start_idx:self.idx + 1]
+
+                    if len(t_window) > 1:
+                        # If more than 1 point, fit a line to the data and compute strain rate (slope)
+                        slope, _ = np.polyfit(t_window, s_window, 1)
+                        self.strainRate[self.idx] = slope
+                    else:
+                        # If only 1 point, strain rate is undefined, set to 0 or any default value
+                        self.strainRate[self.idx] = 0
                 self.temperature[self.idx] = self.get_temperature()
                 self.idx += 1
 
@@ -583,7 +592,7 @@ class TestHandler:
             new_temp = self.temperature[start_idx:current_idx]
 
             fieldnames = ['Epoch Time (s)', 'Elapsed Time (s)', 'Displacement (in)', 'Engineering Strain', 'True Strain', 
-                        'Strain Rate (1/s)', 'Temperature (C)']
+                        'True Strain Rate (1/s)', 'Temperature (C)']
             
             with open(self.test.data_file_name, mode='a', newline='') as file:
                 writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -600,7 +609,7 @@ class TestHandler:
                         'Displacement (in)': new_displacement[i],
                         'Engineering Strain': new_strain[i],
                         'True Strain': new_true_strain[i],
-                        'Strain Rate (1/s)': new_strain_rate[i],
+                        'True Strain Rate (1/s)': new_strain_rate[i],
                         'Temperature (C)': new_temp[i]
                     })
             self.test.last_written_index = current_idx
