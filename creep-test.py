@@ -448,16 +448,12 @@ class TestHandler:
         while not self.testStarted:
             current_time = time.time()
             if (current_time - self.last_read_time) >= 3:
-
-                status = float(self.daq.query("AI0")) # channel 0
-                print(f"Status Voltage: {status}")
-
+                '''status = float(self.daq.query("AI0")) # channel 0
+                print(f"Status Voltage: {status}")''' #causing error when starting test
                 displacementVoltage = float(self.daq.query("AI2")) # channel 2
                 print(f"Displacement Voltage: {displacementVoltage}")
-
                 temperatureVoltage = 1000 * float(self.voltmeter.query("?")) # channel 1
                 print(f"Temperature Voltage: {temperatureVoltage}")
-
                 self.last_read_time = current_time
         self.last_read_time = self.last_read_time - 1000 # to ensure a reading is taken once started
 
